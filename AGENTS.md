@@ -16,6 +16,7 @@ Load-time dependency order:
 4. `elatex-parser.el` — token-to-box composition and layout constructs.
 5. `elatex-draw.el` — rasterization and exact box-tree serialization.
 6. `elatex.el` — the only public facade.
+7. `elatex-preview.el` — optional realtime math-at-point overlays over the public facade.
 
 Render flow:
 
@@ -36,7 +37,8 @@ The code is synchronous. There is no async framework or dependency-injection con
 
 ## Key Directories
 
-- `/` — eight runtime Emacs Lisp modules, `COPYING`, and package-level `.gitignore`.
+- `/` — nine runtime Emacs Lisp modules, `COPYING`, and package-level `.gitignore`.
+- `example/` — isolated `init.el` plus Markdown and Org files for interactive preview testing.
 - `test/` — ERT suites, fixture parser, and opt-in C-oracle differential adapter.
 - `test/fixtures/` — minimal golden outputs copied from the exact pinned upstream revision.
 - `.github/workflows/` — active root CI, including the temporary pinned-oracle download.
@@ -50,6 +52,14 @@ emacs -Q --batch -L . \
   --eval '(progn (require (quote elatex)) (princ (elatex-string "\\frac{a}{b}")))'
 ```
 
+Launch the isolated interactive preview example:
+
+```sh
+emacs --init-directory "$PWD/example" "$PWD/example/preview.org"
+```
+
+Use `preview.md` instead when `markdown-mode` is available on `load-path`.
+
 Byte-compile all package and test files:
 
 ```sh
@@ -57,8 +67,8 @@ emacs -Q --batch -L . -L test \
   -f batch-byte-compile \
   elatex-data.el elatex-string.el elatex-error.el elatex-box.el \
   elatex-lexer.el elatex-parser.el elatex-draw.el elatex.el \
-  test/elatex-fixtures.el test/elatex-test.el \
-  test/elatex-differential-test.el
+  elatex-preview.el test/elatex-fixtures.el test/elatex-test.el \
+  test/elatex-preview-test.el test/elatex-differential-test.el
 ```
 
 Run the normal ERT suite:
@@ -66,6 +76,7 @@ Run the normal ERT suite:
 ```sh
 emacs -Q --batch -L . -L test \
   -l test/elatex-test.el \
+  -l test/elatex-preview-test.el \
   -f ert-run-tests-batch-and-exit
 ```
 
@@ -114,12 +125,14 @@ Use the CI dependency set for the oracle: `build-essential autoconf automake lib
 ## Important Files
 
 - `elatex.el` — public entry point, options, conditions, render lifecycle, and `elatex-result`.
+- `elatex-preview.el` — optional buffer-local/global realtime overlays for Markdown, Org, and LaTeX modes.
 - `elatex-data.el` — generated/pinned tables and stable parser, font, delimiter, box, and style identities.
 - `elatex-parser.el` — recursive construct dispatch and token-to-box composition.
 - `elatex-lexer.el` — preprocessing, command lookup, arguments, scripts, and environments.
 - `elatex-box.el` / `elatex-draw.el` — geometry, positioning, raster output, and debugger tree.
 - `elatex-error.el` — ordered 38-record counted error model and serializers.
 - `test/elatex-test.el` — primary golden and API contract suite.
+- `test/elatex-preview-test.el` — context detection, overlay lifecycle, realtime refresh, and recoverable-error tests.
 - `test/elatex-fixtures.el` — strict parser for the checked-in fixture grammar.
 - `test/fixtures/` — standalone pinned fixtures and exact machine-readable symbol payload.
 - `test/elatex-differential-test.el` — C/Lisp/golden three-way comparison.
@@ -136,7 +149,7 @@ Use the CI dependency set for the oracle: `build-essential autoconf automake lib
 
 ## Testing & QA
 
-Tests use built-in ERT. `test/elatex-test.el` creates 504 exact golden tests from the three pinned fixture files and adds 15 API/contract tests, for 519 normal tests.
+Tests use built-in ERT. `test/elatex-test.el` creates 504 exact golden tests from the three pinned fixture files and adds 15 API/contract tests; `test/elatex-preview-test.el` adds 11 realtime preview tests, for 530 normal tests.
 
 - Golden names: `elatex-golden/<fixture>/bNNN/rNNN/aNNN`.
 - Handwritten names: `elatex-<area>/<behavior>`.

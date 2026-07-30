@@ -27,12 +27,13 @@ jobs:
             -f batch-byte-compile \
             elatex-data.el elatex-string.el elatex-error.el elatex-box.el \
             elatex-lexer.el elatex-parser.el elatex-draw.el elatex.el \
-            test/elatex-fixtures.el test/elatex-test.el \
-            test/elatex-differential-test.el
+            elatex-preview.el test/elatex-fixtures.el test/elatex-test.el \
+            test/elatex-preview-test.el test/elatex-differential-test.el
       - name: Run ERT
         run: |
           emacs -Q --batch -L . -L test \
             -l test/elatex-test.el \
+            -l test/elatex-preview-test.el \
             -f ert-run-tests-batch-and-exit
 
   differential:

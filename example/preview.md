@@ -1,0 +1,9 @@
+# eLaTeX realtime preview
+
+Move point inside an expression to display its rendered form below the source.
+
+Inline GitHub math: $`\frac{a+b}{c}`$
+
+```math
+\sum_{i=1}^{n} i = \frac{n(n+1)}{2}
+```
