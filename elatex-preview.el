@@ -8,10 +8,10 @@
 ;;; Commentary:
 ;;
 ;; `elatex-preview-mode' displays an eLaTeX rendering below the source line
-;; whenever point is inside a math fragment.  It supports `markdown-mode',
-;; `markdown-ts-mode', `org-mode', `latex-mode', and `latex-ts-mode'.
-;; Markdown also recognizes GitHub dollar-backtick inline math and `math'
-;; fenced code blocks.
+;; whenever point is inside mathematical content, never on its delimiters.
+;; It supports `markdown-mode', `markdown-ts-mode', `org-mode', `latex-mode',
+;; and `latex-ts-mode'.  Markdown also recognizes GitHub dollar-backtick
+;; inline math and `math' fenced code blocks.
 ;;
 ;; Enable it in one buffer with:
 ;;
@@ -21,8 +21,10 @@
 ;;
 ;;   (elatex-preview-global-mode 1)
 ;;
-;; The preview is an overlay; source text is never modified.  Updates are
-;; coalesced with a short idle timer while typing.
+;; The preview is a terminal-safe text overlay: it encloses eLaTeX output in
+;; a Unicode box and works in graphical frames and in `emacs -nw'.  Source
+;; text is never modified.  Updates are coalesced with a short idle timer
+;; while typing.
 
 ;;; Code:
 
@@ -88,7 +90,7 @@ Zero disables eLaTeX line wrapping."
 
 (cl-defstruct (elatex-preview--context
                (:constructor elatex-preview--make-context))
-  begin end content)
+  begin end content-begin content-end content)
 
 (defconst elatex-preview--single-dollar-regexp
   (concat "\\(" (regexp-quote "$") "\\)"
@@ -165,6 +167,10 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
              (and (not (eq (char-after (1+ begin)) ?$))
                   (not (eq (char-before (1- end)) ?$)))))))
 
+(defun elatex-preview--content-at-position-p (begin end position)
+  "Return non-nil when POSITION is within nonempty content BEGIN through END."
+  (and (< begin end) (<= begin position) (< position end)))
+
 (defun elatex-preview--regexp-context
     (regexp position &optional dollar-kind allow-markdown-literal)
   "Return math context matching REGEXP around POSITION.
@@ -178,8 +184,11 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
           best)
       (while (re-search-forward regexp limit t)
         (let ((begin (match-beginning 1))
-              (end (match-end 3)))
-          (when (and (<= begin position) (<= position end)
+              (end (match-end 3))
+              (content-begin (match-beginning 2))
+              (content-end (match-end 2)))
+          (when (and (elatex-preview--content-at-position-p
+                      content-begin content-end position)
                      (not (elatex-preview--escaped-p begin))
                      (not (elatex-preview--ignored-position-p
                            begin allow-markdown-literal))
@@ -189,6 +198,7 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
             (let ((candidate
                    (elatex-preview--make-context
                     :begin begin :end end
+                    :content-begin content-begin :content-end content-end
                     :content (match-string-no-properties 2))))
               (when (or (null best)
                         (< (- end begin)
@@ -227,10 +237,13 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
                                (= (char-before close-begin) ?\n))
                           (1- close-begin)
                         close-begin)))
-                (when (and (<= begin position) (<= position end))
+                (when (and (elatex-preview--content-at-position-p
+                            content-begin content-end position)
+                           (<= begin position) (<= position end))
                   (setq context
                         (elatex-preview--make-context
                          :begin begin :end end
+                         :content-begin content-begin :content-end content-end
                          :content (buffer-substring-no-properties
                                    content-begin content-end)))))))))
       context)))
@@ -258,10 +271,14 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
                                     t)
                 (let ((end (point))
                       (content-end (match-beginning 0)))
-                  (when (and (<= begin position) (<= position end))
+                  (when (and (elatex-preview--content-at-position-p
+                              content-begin content-end position)
+                             (<= begin position) (<= position end))
                     (let ((candidate
                            (elatex-preview--make-context
                             :begin begin :end end
+                            :content-begin content-begin
+                            :content-end content-end
                             :content (buffer-substring-no-properties
                                       content-begin content-end))))
                       (when (or (null best)
@@ -271,26 +288,27 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
                         (setq best candidate))))))))))
       best)))
 
-(defun elatex-preview--strip-org-source (source)
-  "Return SOURCE's math body without Org/LaTeX delimiters."
+(defun elatex-preview--org-content-bounds (source)
+  "Return SOURCE offsets delimiting the mathematical content."
   (cond
    ((and (string-prefix-p "$$" source) (string-suffix-p "$$" source))
-    (substring source 2 -2))
+    (cons 2 (- (length source) 2)))
    ((and (string-prefix-p "$" source) (string-suffix-p "$" source))
-    (substring source 1 -1))
+    (cons 1 (1- (length source))))
    ((and (string-prefix-p "\\(" source) (string-suffix-p "\\)" source))
-    (substring source 2 -2))
+    (cons 2 (- (length source) 2)))
    ((and (string-prefix-p "\\[" source) (string-suffix-p "\\]" source))
-    (substring source 2 -2))
+    (cons 2 (- (length source) 2)))
    ((string-match "\\`\\\\begin{\\([^}\n]+\\)}[ \t]*\n?" source)
     (let* ((name (match-string 1 source))
            (begin (match-end 0))
            (close (concat "\\end{" name "}")))
       (if (string-match
            (concat (regexp-quote close) "[ \t]*\n?\\'") source begin)
-          (substring source begin (match-beginning 0))
-        source)))
-   (t source)))
+          (cons begin (match-beginning 0))
+        (cons 0 (length source)))))
+   (t (cons 0 (length source)))))
+
 
 (defun elatex-preview--org-context (position)
   "Return Org math context around POSITION."
@@ -308,12 +326,18 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
             (when (memq type '(latex-fragment latex-environment))
               (let* ((begin (org-element-property :begin element))
                      (source (org-element-property :value element))
-                     (end (+ begin (length source))))
-                (when (and (<= begin position) (<= position end))
+                     (end (+ begin (length source)))
+                     (bounds (elatex-preview--org-content-bounds source))
+                     (content-begin (+ begin (car bounds)))
+                     (content-end (+ begin (cdr bounds))))
+                (when (elatex-preview--content-at-position-p
+                       content-begin content-end position)
                   (setq context
                         (elatex-preview--make-context
                          :begin begin :end end
-                         :content (elatex-preview--strip-org-source source)))))))))
+                         :content-begin content-begin :content-end content-end
+                         :content (substring source
+                                             (car bounds) (cdr bounds))))))))))
       context)))
 
 (defun elatex-preview--prefer-context (&rest contexts)
@@ -351,11 +375,33 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
    ((derived-mode-p 'latex-mode 'latex-ts-mode)
     (elatex-preview--delimited-context (point)))))
 
+(defun elatex-preview--box-output (output)
+  "Return OUTPUT enclosed in a padded Unicode box.
+An empty OUTPUT has no rendered formula and is returned unchanged.  Widths use
+eLaTeX's pinned cell-width tables so every row reaches the same terminal
+column before its right border."
+  (if (string-empty-p output)
+      output
+    (let* ((lines (split-string output "\n" nil))
+           (width (apply #'max (mapcar #'elatex--strspaces lines)))
+           (horizontal (make-string (+ width 2) ?─)))
+      (concat "╭" horizontal "╮\n"
+              (mapconcat
+               (lambda (line)
+                 (concat "│ " line
+                         (make-string (- width (elatex--strspaces line)) ?\s)
+                         " │"))
+               lines "\n")
+              "\n╰" horizontal "╯"))))
+
 (defun elatex-preview--format-after-string (output errors)
-  "Format rendered OUTPUT and ordered ERRORS for an overlay after-string."
-  (let ((error-text (and errors (mapconcat #'identity errors "; "))))
+  "Format boxed rendered OUTPUT and ordered ERRORS for an overlay after-string."
+  (let* ((boxed-output (elatex-preview--box-output output))
+         (error-text (and errors (mapconcat #'identity errors "; "))))
     (concat
-     "\n" (propertize output 'face 'elatex-preview-output-face)
+     (unless (string-empty-p boxed-output)
+       (concat "\n"
+               (propertize boxed-output 'face 'elatex-preview-output-face)))
      (when error-text
        (concat "\n" (propertize error-text 'face 'error))))))
 
@@ -365,18 +411,21 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
     (delete-overlay elatex-preview--overlay))
   (setq elatex-preview--overlay nil
         elatex-preview--last-signature nil))
-
 (defun elatex-preview--show (context output errors)
   "Display OUTPUT and ERRORS for CONTEXT below its final source line."
-  (let ((position
-         (save-excursion
-           (goto-char (elatex-preview--context-end context))
-           (line-end-position))))
+  (let* ((position
+          (save-excursion
+            (goto-char (elatex-preview--context-end context))
+            (line-end-position)))
+         ;; A zero-width overlay at end of buffer has no terminal cell to
+         ;; attach its `after-string' to.  Anchor to the final source cell so
+         ;; the preview remains visible in `emacs -nw' at end of buffer.
+         (start (if (= position (point-min)) position (1- position))))
     (unless (overlayp elatex-preview--overlay)
-      (setq elatex-preview--overlay (make-overlay position position nil t t))
+      (setq elatex-preview--overlay (make-overlay start position nil t t))
       (overlay-put elatex-preview--overlay 'evaporate t)
       (overlay-put elatex-preview--overlay 'priority 100))
-    (move-overlay elatex-preview--overlay position position)
+    (move-overlay elatex-preview--overlay start position)
     (overlay-put elatex-preview--overlay 'after-string
                  (elatex-preview--format-after-string output errors))))
 
@@ -447,7 +496,7 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
 The preview appears below the expression's final source line and updates after
 point movement or buffer edits.  Supported major modes are controlled by
 `elatex-preview-supported-modes'."
-  :lighter " eLtx"
+  :lighter " eL"
   :group 'elatex-preview
   (if elatex-preview-mode
       (if (not (elatex-preview--supported-mode-p))

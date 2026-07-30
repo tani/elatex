@@ -58,6 +58,8 @@ Launch the isolated interactive preview example:
 emacs --init-directory "$PWD/example" "$PWD/example/preview.org"
 ```
 
+Add `-nw` to the command for the same in-buffer preview in a terminal frame.
+
 Use `preview.md` instead when `markdown-mode` is available on `load-path`.
 
 Byte-compile all package and test files:
@@ -148,8 +150,7 @@ Use the CI dependency set for the oracle: `build-essential autoconf automake lib
 - Root `*.elc` files are generated and ignored. Keep downloaded oracle source and its build products outside the repository.
 
 ## Testing & QA
-
-Tests use built-in ERT. `test/elatex-test.el` creates 504 exact golden tests from the three pinned fixture files and adds 15 API/contract tests; `test/elatex-preview-test.el` adds 11 realtime preview tests, for 530 normal tests.
+Tests use built-in ERT. `test/elatex-test.el` creates 504 exact golden tests from the three pinned fixture files and adds 15 API/contract tests; `test/elatex-preview-test.el` adds 14 realtime preview tests, for 533 normal tests.
 
 - Golden names: `elatex-golden/<fixture>/bNNN/rNNN/aNNN`.
 - Handwritten names: `elatex-<area>/<behavior>`.

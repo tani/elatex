@@ -1,2 +1,4 @@
 *.elc
 example/eln-cache/
+*~
+\#*

@@ -18,6 +18,7 @@
     (insert source "\nTail")
     (goto-char (point-min))
     (search-forward "a+b")
+    (goto-char (match-beginning 0))
     (let ((elatex-preview-idle-delay 0))
       (unwind-protect
           (progn
@@ -27,9 +28,51 @@
             (should
              (equal (substring-no-properties
                      (overlay-get elatex-preview--overlay 'after-string))
-                    "\na+b"))
+                    "\n╭─────╮\n│ a+b │\n╰─────╯"))
             (goto-char (point-max))
             (run-hooks 'post-command-hook)
+            (should-not (overlayp elatex-preview--overlay)))
+        (elatex-preview-mode -1)))))
+
+(ert-deftest elatex-preview/box-output ()
+  (should (equal (elatex-preview--box-output "a\nbc")
+                 "╭────╮\n│ a  │\n│ bc │\n╰────╯"))
+  (should (equal (elatex-preview--box-output "") "")))
+
+(ert-deftest elatex-preview/delimiters-do-not-trigger-rendering ()
+  (dolist (scenario
+           '((markdown-mode "$a+b$" "a+b")
+             (markdown-mode "```math\na+b\n```" "a+b")
+             (latex-mode "\\begin{equation}\na+b\n\\end{equation}" "a+b")
+             (org-mode "\\(a+b\\)" "a+b")))
+    (pcase-let ((`(,mode ,source ,content) scenario))
+      (with-temp-buffer
+        (if (eq mode 'org-mode)
+            (org-mode)
+          (setq major-mode mode))
+        (insert source)
+        (let ((elatex-preview-idle-delay 0))
+          (unwind-protect
+              (progn
+                (elatex-preview-mode 1)
+                (goto-char (point-min))
+                (elatex-preview-refresh)
+                (should-not (overlayp elatex-preview--overlay))
+                (search-forward content)
+                (goto-char (match-beginning 0))
+                (elatex-preview-refresh)
+                (should (overlayp elatex-preview--overlay)))
+            (elatex-preview-mode -1))))))
+  (with-temp-buffer
+    (setq major-mode 'markdown-mode)
+    (insert "$a+b$")
+    (let ((elatex-preview-idle-delay 0))
+      (unwind-protect
+          (progn
+            (elatex-preview-mode 1)
+            (goto-char (point-min))
+            (search-forward "$a+b")
+            (elatex-preview-refresh)
             (should-not (overlayp elatex-preview--overlay)))
         (elatex-preview-mode -1)))))
 
@@ -66,6 +109,26 @@
    'latex-ts-mode
    "\\begin{equation}\na+b\n\\end{equation}"))
 
+(ert-deftest elatex-preview/terminal-frame-overlay ()
+  (skip-unless (not (display-graphic-p)))
+  (with-temp-buffer
+    (setq major-mode 'markdown-mode)
+    (insert "Text $\\frac{a}{b}$")
+    (search-backward "frac")
+    (let ((elatex-preview-idle-delay 0))
+      (unwind-protect
+          (progn
+            (elatex-preview-mode 1)
+            (elatex-preview-refresh)
+            (should (< (overlay-start elatex-preview--overlay)
+                       (overlay-end elatex-preview--overlay)))
+            (let ((preview
+                   (overlay-get elatex-preview--overlay 'after-string)))
+              (should (equal (substring-no-properties preview)
+                             "\n╭───╮\n│ a │\n│ ─ │\n│ b │\n╰───╯"))
+              (should-not (get-text-property 1 'display preview))))
+        (elatex-preview-mode -1)))))
+
 (ert-deftest elatex-preview/realtime-edit-refresh ()
   (with-temp-buffer
     (setq major-mode 'markdown-mode)
@@ -77,10 +140,12 @@
             (elatex-preview-mode 1)
             (delete-char 1)
             (insert "c")
+            (backward-char 1)
+            (elatex-preview-refresh)
             (should
              (equal (substring-no-properties
                      (overlay-get elatex-preview--overlay 'after-string))
-                    "\na+c")))
+                    "\n╭─────╮\n│ a+c │\n╰─────╯")))
         (elatex-preview-mode -1)))))
 
 (ert-deftest elatex-preview/recoverable-error-output ()
@@ -94,7 +159,7 @@
             (elatex-preview-mode 1)
             (elatex-preview-refresh)
             (should (string-match-p
-                     "Unknown command (1x)"
+                     (regexp-quote "Unknown command (1x)")
                      (overlay-get elatex-preview--overlay 'after-string))))
         (elatex-preview-mode -1)))))
 

@@ -4,6 +4,7 @@
 ;;
 ;;   emacs --init-directory "$PWD/example" "$PWD/example/preview.org"
 ;;   emacs --init-directory "$PWD/example" "$PWD/example/preview.md"
+;; Add `-nw' to either command to run the same inline previews in a terminal.
 ;;
 ;; The Markdown example requires markdown-mode to be available on `load-path'.
 
