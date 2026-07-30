@@ -64,30 +64,13 @@
           (should (equal (elatex-errors-string) "")))
       (kill-buffer external-debugging-output))))
 
-(defun elatex-test--decode-shell-double-quoted (string)
-  "Decode the backslash rules used by a Bash double-quoted STRING literal."
-  (let ((index 0) pieces)
-    (while (< index (length string))
-      (let ((character (aref string index)))
-        (if (and (= character ?\\) (< (1+ index) (length string))
-                 (memq (aref string (1+ index)) '(?\\ ?\" ?\$ ?\`)))
-            (progn (push (char-to-string (aref string (1+ index))) pieces)
-                   (setq index (+ index 2)))
-          (push (char-to-string character) pieces)
-          (setq index (1+ index)))))
-    (apply #'concat (nreverse pieces))))
-
 (defun elatex-test--symbols-oracle ()
-  "Extract the full expected payload from testtexsymbols.sh without a shell."
+  "Read the full pinned machine-readable symbol payload."
   (let ((coding-system-for-read 'utf-8-unix)
-        (path (expand-file-name "../testtexsymbols.sh"
-                                elatex-fixtures--directory)))
+        (path (expand-file-name "symbols.txt" elatex-fixtures--directory)))
     (with-temp-buffer
       (insert-file-contents path)
-      (goto-char (point-min))
-      (unless (re-search-forward "^reference=\"\\(.*\\)\"$" nil t)
-        (error "Missing symbol oracle assignment"))
-      (elatex-test--decode-shell-double-quoted (match-string 1)))))
+      (buffer-string))))
 
 (ert-deftest elatex-symbols/full-machine-payload ()
   (should (equal (elatex-symbols-string) (elatex-test--symbols-oracle)))

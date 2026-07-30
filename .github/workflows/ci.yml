@@ -45,12 +45,22 @@ jobs:
         uses: purcell/setup-emacs@master
         with:
           version: "30.2"
+      - name: Download pinned oracle source
+        env:
+          LIBTEXPRINTF_REVISION: 18977837b20649d56a651eb6bf846f1c914db77a
+        run: |
+          git init "${RUNNER_TEMP}/libtexprintf"
+          git -C "${RUNNER_TEMP}/libtexprintf" remote add origin \
+            https://github.com/bartp5/libtexprintf.git
+          git -C "${RUNNER_TEMP}/libtexprintf" fetch --depth 1 \
+            origin "${LIBTEXPRINTF_REVISION}"
+          git -C "${RUNNER_TEMP}/libtexprintf" checkout --detach FETCH_HEAD
       - name: Install oracle build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool gawk
       - name: Build and test pinned oracle
-        working-directory: reference
+        working-directory: ${{ runner.temp }}/libtexprintf
         env:
           LC_ALL: C.UTF-8
           LANG: C.UTF-8
@@ -61,7 +71,7 @@ jobs:
           make check
       - name: Run differential ERT
         env:
-          ELATEX_ORACLE: ${{ github.workspace }}/reference/src/utftex
+          ELATEX_ORACLE: ${{ runner.temp }}/libtexprintf/src/utftex
           LC_ALL: C.UTF-8
           LANG: C.UTF-8
         run: |

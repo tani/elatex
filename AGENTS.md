@@ -4,7 +4,7 @@
 
 `elatex` is a self-contained native Emacs Lisp port of Bart Pieters's `libtexprintf` 1.31, pinned to revision `18977837b20649d56a651eb6bf846f1c914db77a`. It renders TeX-like mathematics as Unicode monospace text and exposes recoverable errors, configuration, symbol listings, stream adapters, and a box-tree debugger.
 
-The root package has no runtime C, Node, WASM, subprocess, FFI, or third-party Elisp dependency. Treat `reference/` as an immutable behavioral oracle, not as active root source or packaging configuration.
+The root package has no runtime C, Node, WASM, subprocess, FFI, or third-party Elisp dependency. Pinned golden data lives under `test/fixtures/`; CI downloads the C oracle into temporary storage only for differential verification.
 
 ## Architecture & Data Flow
 
@@ -38,10 +38,8 @@ The code is synchronous. There is no async framework or dependency-injection con
 
 - `/` — eight runtime Emacs Lisp modules, `COPYING`, and package-level `.gitignore`.
 - `test/` — ERT suites, fixture parser, and opt-in C-oracle differential adapter.
-- `reference/` — vendored pinned C source, fixtures, scripts, man pages, and upstream metadata.
-- `reference/src/` — definitive C behavior and ordered data tables used for source-to-port tracing.
-- `reference/test/` — checked-in golden fixture grammar and expected output.
-- `.github/workflows/` — active root CI. Ignore nested `reference/.github/workflows/` for root development.
+- `test/fixtures/` — minimal golden outputs copied from the exact pinned upstream revision.
+- `.github/workflows/` — active root CI, including the temporary pinned-oracle download.
 
 ## Development Commands
 
@@ -71,28 +69,33 @@ emacs -Q --batch -L . -L test \
   -f ert-run-tests-batch-and-exit
 ```
 
-Build and check the pinned C oracle:
+Build and check a temporary pinned C oracle:
 
 ```sh
-cd reference
+git init /tmp/libtexprintf-pinned
+git -C /tmp/libtexprintf-pinned remote add origin \
+  https://github.com/bartp5/libtexprintf.git
+git -C /tmp/libtexprintf-pinned fetch --depth 1 origin \
+  18977837b20649d56a651eb6bf846f1c914db77a
+git -C /tmp/libtexprintf-pinned checkout --detach FETCH_HEAD
+cd /tmp/libtexprintf-pinned
 LC_ALL=C.UTF-8 LANG=C.UTF-8 sh autogen.sh
 LC_ALL=C.UTF-8 LANG=C.UTF-8 ./configure
 LC_ALL=C.UTF-8 LANG=C.UTF-8 make -j2
 LC_ALL=C.UTF-8 LANG=C.UTF-8 make check
-cd ..
 ```
 
-Run differential parity after a successful oracle build:
+Run differential parity after a successful oracle build, from the repository root:
 
 ```sh
 LC_ALL=C.UTF-8 LANG=C.UTF-8 \
-ELATEX_ORACLE="$PWD/reference/src/utftex" \
+ELATEX_ORACLE=/tmp/libtexprintf-pinned/src/utftex \
 emacs -Q --batch -L . -L test \
   -l test/elatex-differential-test.el \
   -f ert-run-tests-batch-and-exit
 ```
 
-Use the CI dependency set for the oracle: `build-essential autoconf automake libtool gawk`. Do not patch vendored `configure.ac` to accommodate a local Autotools mismatch; use a compatible toolchain or a temporary out-of-tree workaround.
+Use the CI dependency set for the oracle: `build-essential autoconf automake libtool gawk`. Keep the checkout outside this repository. Do not patch pinned upstream files to accommodate a local Autotools mismatch; use a compatible toolchain or a disposable workaround.
 
 ## Code Conventions & Common Patterns
 
@@ -105,8 +108,8 @@ Use the CI dependency set for the oracle: `build-essential autoconf automake lib
 - Copy mutable style/error vectors for per-call isolation. Restore dynamically published state with `unwind-protect` around callbacks or signaling paths.
 - Public formatted wrappers intentionally use native Emacs `format`; `elatex-string` is unformatted.
 - Output whitespace, final-newline behavior, UTF-8 byte counts, diagnostic capitalization/order, and debugger indentation are observable contracts.
-- Never format or normalize golden fixture files or the large symbol literal in `reference/testtexsymbols.sh`.
-- Keep `reference/` unchanged during normal Elisp work. An upstream refresh must be a deliberate pin update with regenerated tables and full differential review.
+- Never format or normalize golden files under `test/fixtures/`, including `symbols.txt`.
+- An upstream refresh must be a deliberate pin update: download the new exact revision, review source/table/error ordering changes, replace the minimal fixtures, and run full differential verification.
 
 ## Important Files
 
@@ -117,22 +120,19 @@ Use the CI dependency set for the oracle: `build-essential autoconf automake lib
 - `elatex-box.el` / `elatex-draw.el` — geometry, positioning, raster output, and debugger tree.
 - `elatex-error.el` — ordered 38-record counted error model and serializers.
 - `test/elatex-test.el` — primary golden and API contract suite.
-- `test/elatex-fixtures.el` — strict parser for pinned upstream fixture grammar.
+- `test/elatex-fixtures.el` — strict parser for the checked-in fixture grammar.
+- `test/fixtures/` — standalone pinned fixtures and exact machine-readable symbol payload.
 - `test/elatex-differential-test.el` — C/Lisp/golden three-way comparison.
-- `.github/workflows/ci.yml` — authoritative supported commands and Emacs matrix.
-- `reference/src/{parsedef.h,lexer.c,parser.c,boxes.c,drawbox.c,stringutils.c}` — primary source-mapping oracle.
-- `reference/src/{unicodeblocks.h,mapunicode.h,drawchars.h}` — pinned Unicode/style data.
-- `reference/{Makefile.am,src/Makefile.am}` — oracle targets, generators, and upstream checks.
+- `.github/workflows/ci.yml` — authoritative Emacs matrix and ephemeral oracle download/build.
 
 ## Runtime/Tooling Preferences
 
 - Required runtime: GNU Emacs 29.1 or newer. CI exercises exact 29.1 and 30.2.
 - Root dependencies: built-in `cl-lib`, ERT, and standard Emacs libraries only.
 - There is no root Makefile, Cask, Eask, package manager, Bun, or Node workflow. Use the explicit batch Emacs commands above.
-- Node/Emscripten/WASM files under `reference/` are upstream packaging references, not root dependencies.
-- Oracle work requires a C toolchain, Autoconf, Automake, Libtool, GNU awk, Make, and `C.UTF-8`.
-- Root `*.elc` files and `reference/` build products are generated and ignored; do not commit them.
-- `reference/src/errorflags.h`, `errormessages.h`, and `texprintfsymbols` are generated outputs. Do not hand-edit them.
+- No C source, Node, Emscripten, or WASM package is vendored or required at runtime.
+- Oracle work requires Git, a C toolchain, Autoconf, Automake, Libtool, GNU awk, Make, and `C.UTF-8`.
+- Root `*.elc` files are generated and ignored. Keep downloaded oracle source and its build products outside the repository.
 
 ## Testing & QA
 
@@ -145,5 +145,5 @@ Tests use built-in ERT. `test/elatex-test.el` creates 504 exact golden tests fro
 - Add tests for observable behavior, boundaries, precedence, state restoration, and real error output—not implementation plumbing.
 - The normal ERT suite does not require C. The differential suite skips unless `ELATEX_ORACLE` names an executable, so a skipped run is not parity proof.
 - Run the compiled oracle and differential suite for renderer, parser, lexer, layout, table, fixture, symbol, or output-format changes.
-- `make check` in `reference/` runs five upstream drivers: equations, main suite, fonts, malformed-error formatting, and full symbol serialization.
+- `make check` in the temporary upstream checkout runs five drivers: equations, main suite, fonts, malformed-error formatting, and full symbol serialization.
 - No coverage tool or numeric coverage threshold is configured. Exact golden parity, API regressions, warning-free byte compilation, and both supported Emacs versions are the QA bar.

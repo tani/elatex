@@ -14,9 +14,9 @@
 (require 'elatex)
 
 (defconst elatex-fixtures--directory
-  (expand-file-name "../reference/test/"
+  (expand-file-name "fixtures/"
                     (file-name-directory (or load-file-name buffer-file-name)))
-  "Pinned upstream fixture directory located relative to this module.")
+  "Pinned golden fixture directory located relative to this module.")
 
 (cl-defstruct (elatex-fixture-execution
                (:constructor elatex-fixture--make-execution))
