@@ -586,7 +586,8 @@ column before its right border."
                   (with-selected-window source
                     (save-excursion
                       (goto-char position)
-                      (car (line-pixel-height))))))
+                      (let ((height (line-pixel-height)))
+                        (if (consp height) (car height) height))))))
             (with-current-buffer buffer
               (let ((inhibit-read-only t))
                 (erase-buffer)
