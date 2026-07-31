@@ -53,6 +53,21 @@
             (elatex-preview--format-after-string "a+b" nil))
            "\n╭─────╮\n│ a+b │\n╰─────╯")))
 
+(ert-deftest elatex-preview/child-frame-fit-uses-rendered-pixel-size ()
+  (let (arguments)
+    (cl-letf (((symbol-function 'frame-root-window)
+               (lambda (_frame) 'window))
+              ((symbol-function 'window-text-pixel-size)
+               (lambda (&rest values)
+                 (setq arguments values)
+                 '(37 . 24)))
+              ((symbol-function 'set-frame-size)
+               (lambda (&rest values)
+                 (setq arguments (append arguments (list values))))))
+      (elatex-preview--child-frame-fit 'child)
+      (should (equal arguments
+                     '(window t t t (child 37 24 t)))))))
+
 (ert-deftest elatex-preview/delimiters-and-fences-trigger-rendering ()
   (dolist (scenario
            '((markdown-mode "$a+b$")
@@ -348,6 +363,14 @@
                               (with-current-buffer payload (buffer-string)))
                              "a+b"))
               (should (frame-visible-p child))
+              (let ((initial-width (frame-pixel-width child)))
+                (goto-char (1- (point-max)))
+                (insert "+c")
+                (elatex-preview-refresh)
+                (should (equal (substring-no-properties
+                                (with-current-buffer payload (buffer-string)))
+                               "a+b+c"))
+                (should (> (frame-pixel-width child) initial-width)))
               (goto-char (point-max))
               (elatex-preview-refresh)
               (should-not (frame-visible-p child))

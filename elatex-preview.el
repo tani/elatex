@@ -549,6 +549,12 @@ column before its right border."
             (- line-top child-height))))
     (cons x (max 0 (min preferred-top max-top)))))
 
+(defun elatex-preview--child-frame-fit (child)
+  "Resize CHILD to the pixel dimensions of its rendered payload."
+  (pcase-let ((`(,width . ,height)
+               (window-text-pixel-size (frame-root-window child) t t t)))
+    (set-frame-size child (max 1 width) (max 1 height) t)))
+
 (defun elatex-preview--child-frame-hide ()
   "Hide the retained child frame, if any."
   (when (frame-live-p elatex-preview--child-frame)
@@ -594,8 +600,7 @@ column before its right border."
                 (insert payload)
                 (setq-local buffer-read-only t)
                 (set-buffer-modified-p nil)))
-            (fit-frame-to-buffer child (frame-height parent) 1
-                                 (frame-width parent) 1)
+            (elatex-preview--child-frame-fit child)
             (pcase-let* ((`(,parent-left ,parent-top ,parent-right ,parent-bottom)
                            (frame-edges parent 'native-edges))
                           (`(,x . ,y) absolute)
