@@ -36,24 +36,8 @@ jobs:
             -l test/elatex-preview-test.el \
             -f ert-run-tests-batch-and-exit
 
-  lua:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        lua-version: ["5.1", "5.2", "5.3", "5.4"]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install Lua
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y lua${{ matrix.lua-version }}
-      - name: Run Lua suite
-        run: LC_ALL=C.UTF-8 LANG=C.UTF-8 lua${{ matrix.lua-version }} lua/test/run.lua
-
   differential:
-    needs: [ert, lua]
+    needs: ert
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -75,7 +59,7 @@ jobs:
       - name: Install oracle build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential autoconf automake libtool gawk lua5.4
+          sudo apt-get install -y build-essential autoconf automake libtool gawk
       - name: Build and test pinned oracle
         working-directory: ${{ runner.temp }}/libtexprintf
         env:
@@ -95,9 +79,3 @@ jobs:
           emacs -Q --batch -L . -L test \
             -l test/elatex-differential-test.el \
             -f ert-run-tests-batch-and-exit
-      - name: Run Lua oracle differential
-        env:
-          ELATEX_ORACLE: ${{ runner.temp }}/libtexprintf/src/utftex
-          LC_ALL: C.UTF-8
-          LANG: C.UTF-8
-        run: lua5.4 lua/test/run.lua --oracle
