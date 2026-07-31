@@ -40,6 +40,19 @@
                  "╭────╮\n│ a  │\n│ bc │\n╰────╯"))
   (should (equal (elatex-preview--box-output "") "")))
 
+(ert-deftest elatex-preview/child-frame-payload-is-unboxed ()
+  (let ((payload (elatex-preview--format-payload
+                  "a+b" '("First error" "Second error"))))
+    (should (equal (substring-no-properties payload)
+                   "a+b\nFirst error; Second error"))
+    (should (eq (get-text-property 0 'face payload)
+                'elatex-preview-output-face))
+    (should (eq (get-text-property 4 'face payload) 'error)))
+  (should (equal
+           (substring-no-properties
+            (elatex-preview--format-after-string "a+b" nil))
+           "\n╭─────╮\n│ a+b │\n╰─────╯")))
+
 (ert-deftest elatex-preview/delimiters-and-fences-trigger-rendering ()
   (dolist (scenario
            '((markdown-mode "$a+b$")
@@ -333,7 +346,7 @@
               (should (eq (frame-parent child) (window-frame window)))
               (should (equal (substring-no-properties
                               (with-current-buffer payload (buffer-string)))
-                             "╭─────╮\n│ a+b │\n╰─────╯"))
+                             "a+b"))
               (should (frame-visible-p child))
               (goto-char (point-max))
               (elatex-preview-refresh)

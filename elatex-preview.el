@@ -21,10 +21,10 @@
 ;;
 ;;   (elatex-preview-global-mode 1)
 ;;
-;; On graphical frames the default child-frame backend shows a Unicode boxed
-;; preview beside the cursor row.  Text terminals, and graphical child-frame
-;; failures, use the terminal-safe after-string backend instead.  Source text
-;; is never modified.  Updates are coalesced with a short idle timer while
+;; On graphical frames the default child-frame backend shows the eLaTeX output
+;; beside the cursor row.  Text terminals, and graphical child-frame failures,
+;; use the terminal-safe boxed after-string backend instead.  Source text is
+;; never modified.  Updates are coalesced with a short idle timer while
 ;; typing.
 
 ;;; Code:
@@ -426,18 +426,18 @@ column before its right border."
               "\n╰" horizontal "╯"))))
 
 (defun elatex-preview--format-payload (output errors)
-  "Format boxed OUTPUT and ordered ERRORS for either presentation backend."
-  (let ((boxed-output (elatex-preview--box-output output))
-        (error-text (and errors (mapconcat #'identity errors "; "))))
+  "Format unboxed OUTPUT and ordered ERRORS for child-frame presentation."
+  (let ((error-text (and errors (mapconcat #'identity errors "; "))))
     (concat
-     (unless (string-empty-p boxed-output)
-       (propertize boxed-output 'face 'elatex-preview-output-face))
-     (when (and (not (string-empty-p boxed-output)) error-text) "\n")
+     (unless (string-empty-p output)
+       (propertize output 'face 'elatex-preview-output-face))
+     (when (and (not (string-empty-p output)) error-text) "\n")
      (when error-text (propertize error-text 'face 'error)))))
 
 (defun elatex-preview--format-after-string (output errors)
-  "Format boxed OUTPUT and ERRORS for an overlay after-string."
-  (let ((payload (elatex-preview--format-payload output errors)))
+  "Format boxed OUTPUT and ordered ERRORS for an overlay after-string."
+  (let ((payload (elatex-preview--format-payload
+                  (elatex-preview--box-output output) errors)))
     (if (string-empty-p payload) "" (concat "\n" payload))))
 
 (defun elatex-preview--source-window ()

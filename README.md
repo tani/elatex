@@ -59,11 +59,12 @@ Translated compatibility entry points are also available:
 
 ## Live preview mode
 
-`elatex-preview` provides a rounded Unicode-box preview for `markdown-mode`,
+`elatex-preview` provides realtime output for `markdown-mode`,
 `markdown-ts-mode`, `org-mode`, `latex-mode`, and `latex-ts-mode`.  On
-graphical frames, its default `child-frame` backend follows the cursor row.
-Text terminals, or a failed child-frame creation, automatically use the
-terminal-safe after-string backend below the source line.
+graphical frames, its default `child-frame` backend shows the rendered
+mathematics without a box beside the cursor row.  Text terminals, or a failed
+child-frame creation, automatically use the terminal-safe rounded Unicode-box
+after-string backend below the source line.
 
 ```elisp
 (require 'elatex-preview)
