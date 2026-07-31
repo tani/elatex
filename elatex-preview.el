@@ -550,10 +550,22 @@ column before its right border."
     (cons x (max 0 (min preferred-top max-top)))))
 
 (defun elatex-preview--child-frame-fit (child)
-  "Resize CHILD to the pixel dimensions of its rendered payload."
-  (pcase-let ((`(,width . ,height)
-               (window-text-pixel-size (frame-root-window child) t t t)))
-    (set-frame-size child (max 1 width) (max 1 height) t)))
+  "Resize CHILD so its visible window contains the rendered payload."
+  (let* ((window (frame-root-window child))
+         (size (window-text-pixel-size window t t t))
+         (width (max 1 (car size)))
+         (height (max 1 (cdr size))))
+    (set-frame-size child width height t)
+    ;; Pixelwise frame requests may be rounded down by a window manager or
+    ;; consumed by frame chrome.  Correct from the actual visible dimensions
+    ;; so the final glyph is never clipped.
+    (let ((width-deficit (- width (window-pixel-width window)))
+          (height-deficit (- height (window-pixel-height window))))
+      (when (or (> width-deficit 0) (> height-deficit 0))
+        (set-frame-size child
+                        (+ (frame-pixel-width child) (max 0 width-deficit))
+                        (+ (frame-pixel-height child) (max 0 height-deficit))
+                        t)))))
 
 (defun elatex-preview--child-frame-hide ()
   "Hide the retained child frame, if any."
