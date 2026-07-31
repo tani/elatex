@@ -59,14 +59,27 @@ Translated compatibility entry points are also available:
 
 ## Live preview mode
 
-`elatex-preview` provides a terminal-safe, rounded Unicode-box preview below the source line.  It supports `markdown-mode`, `markdown-ts-mode`, `org-mode`, `latex-mode`, and `latex-ts-mode`.
+`elatex-preview` provides a rounded Unicode-box preview for `markdown-mode`,
+`markdown-ts-mode`, `org-mode`, `latex-mode`, and `latex-ts-mode`.  On
+graphical frames, its default `child-frame` backend follows the cursor row.
+Text terminals, or a failed child-frame creation, automatically use the
+terminal-safe after-string backend below the source line.
 
 ```elisp
 (require 'elatex-preview)
 (elatex-preview-global-mode 1)
 ```
 
-The preview recognizes `$…$`, `$$…$$`, `\(...\)`, `\[...\]`, configured LaTeX math environments, Org math fragments, GitHub dollar-backtick inline math, and Markdown `math` fences.  It appears only while point is in mathematical content, not on a delimiter or fence.
+The preview recognizes `$…$`, `$$…$$`, `\(...\)`, `\[...\]`, configured LaTeX
+math environments, Org math fragments, GitHub dollar-backtick inline math, and
+Markdown `math` fences.  Every character of a recognized nonempty construct,
+including its delimiters and fences, keeps the preview visible.
+
+Use the prior always-in-buffer presentation explicitly:
+
+```elisp
+(setq elatex-preview-backend 'after-string)
+```
 
 Try the isolated example configuration from the repository root:
 
@@ -74,7 +87,8 @@ Try the isolated example configuration from the repository root:
 emacs --init-directory "$PWD/example" "$PWD/example/preview.org"
 ```
 
-Use `preview.md` when `markdown-mode` is available on `load-path`; add `-nw` for the same in-buffer preview in a terminal frame.
+Use `preview.md` when `markdown-mode` is available on `load-path`; add `-nw`
+to exercise the automatic terminal-safe fallback in a terminal frame.
 
 ## Verify
 

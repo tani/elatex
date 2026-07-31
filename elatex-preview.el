@@ -7,11 +7,11 @@
 
 ;;; Commentary:
 ;;
-;; `elatex-preview-mode' displays an eLaTeX rendering below the source line
-;; whenever point is inside mathematical content, never on its delimiters.
-;; It supports `markdown-mode', `markdown-ts-mode', `org-mode', `latex-mode',
-;; and `latex-ts-mode'.  Markdown also recognizes GitHub dollar-backtick
-;; inline math and `math' fenced code blocks.
+;; `elatex-preview-mode' displays an eLaTeX rendering while point belongs to a
+;; recognized nonempty mathematical construct, including its delimiters and
+;; Markdown fences.  It supports `markdown-mode', `markdown-ts-mode',
+;; `org-mode', `latex-mode', and `latex-ts-mode'.  Markdown also recognizes
+;; GitHub dollar-backtick inline math and `math' fenced code blocks.
 ;;
 ;; Enable it in one buffer with:
 ;;
@@ -21,10 +21,11 @@
 ;;
 ;;   (elatex-preview-global-mode 1)
 ;;
-;; The preview is a terminal-safe text overlay: it encloses eLaTeX output in
-;; a Unicode box and works in graphical frames and in `emacs -nw'.  Source
-;; text is never modified.  Updates are coalesced with a short idle timer
-;; while typing.
+;; On graphical frames the default child-frame backend shows a Unicode boxed
+;; preview beside the cursor row.  Text terminals, and graphical child-frame
+;; failures, use the terminal-safe after-string backend instead.  Source text
+;; is never modified.  Updates are coalesced with a short idle timer while
+;; typing.
 
 ;;; Code:
 
@@ -62,6 +63,13 @@ Set this to zero for synchronous updates."
   "Preferred preview width in cells.
 Zero disables eLaTeX line wrapping."
   :type 'integer
+  :group 'elatex-preview)
+
+(defcustom elatex-preview-backend 'child-frame
+  "Presentation backend for realtime previews.
+`child-frame' is used on graphical source frames and otherwise falls back to
+the terminal-safe `after-string' backend."
+  :type '(choice (const child-frame) (const after-string))
   :group 'elatex-preview)
 
 (defcustom elatex-preview-max-scan-distance 20000
@@ -125,6 +133,12 @@ The three components are captured in groups one through three."
 (defvar-local elatex-preview--overlay nil)
 (defvar-local elatex-preview--timer nil)
 (defvar-local elatex-preview--last-signature nil)
+(defvar-local elatex-preview--last-output nil)
+(defvar-local elatex-preview--last-errors nil)
+(defvar-local elatex-preview--active-backend nil)
+(defvar-local elatex-preview--child-frame nil)
+(defvar-local elatex-preview--child-frame-buffer nil)
+(defvar-local elatex-preview--child-frame-failed nil)
 
 (defun elatex-preview--supported-mode-p ()
   "Return non-nil when the current major mode supports previews."
@@ -167,9 +181,12 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
              (and (not (eq (char-after (1+ begin)) ?$))
                   (not (eq (char-before (1- end)) ?$)))))))
 
-(defun elatex-preview--content-at-position-p (begin end position)
-  "Return non-nil when POSITION is within nonempty content BEGIN through END."
-  (and (< begin end) (<= begin position) (< position end)))
+(defun elatex-preview--context-contains-position-p
+    (begin end content-begin content-end position)
+  "Return non-nil when nonempty context BEGIN through END contains POSITION."
+  (and (< content-begin content-end)
+       (<= begin position)
+       (< position end)))
 
 (defun elatex-preview--regexp-context
     (regexp position &optional dollar-kind allow-markdown-literal)
@@ -187,8 +204,8 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
               (end (match-end 3))
               (content-begin (match-beginning 2))
               (content-end (match-end 2)))
-          (when (and (elatex-preview--content-at-position-p
-                      content-begin content-end position)
+          (when (and (elatex-preview--context-contains-position-p
+                      begin end content-begin content-end position)
                      (not (elatex-preview--escaped-p begin))
                      (not (elatex-preview--ignored-position-p
                            begin allow-markdown-literal))
@@ -219,7 +236,7 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
       (while (and (not context)
                   (re-search-forward
                    "^ \\{0,3\\}\\(`\\{3,\\}\\)[ \t]*math[ \t]*\r?$"
-                   position t))
+                   limit t))
         (let* ((begin (match-beginning 0))
                (fence (match-string-no-properties 1))
                (content-begin
@@ -237,9 +254,8 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
                                (= (char-before close-begin) ?\n))
                           (1- close-begin)
                         close-begin)))
-                (when (and (elatex-preview--content-at-position-p
-                            content-begin content-end position)
-                           (<= begin position) (<= position end))
+                (when (elatex-preview--context-contains-position-p
+                       begin end content-begin content-end position)
                   (setq context
                         (elatex-preview--make-context
                          :begin begin :end end
@@ -251,7 +267,8 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
 (defun elatex-preview--environment-context (position)
   "Return the innermost supported LaTeX environment around POSITION."
   (save-excursion
-    (goto-char position)
+    (goto-char (min (point-max)
+                    (+ position (max 0 elatex-preview-max-scan-distance))))
     (let ((limit (max (point-min)
                       (- position (max 0 elatex-preview-max-scan-distance))))
           best)
@@ -271,9 +288,16 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
                                     t)
                 (let ((end (point))
                       (content-end (match-beginning 0)))
-                  (when (and (elatex-preview--content-at-position-p
-                              content-begin content-end position)
-                             (<= begin position) (<= position end))
+                  (when (eq (char-after content-begin) ?\r)
+                    (setq content-begin (1+ content-begin)))
+                  (when (eq (char-after content-begin) ?\n)
+                    (setq content-begin (1+ content-begin)))
+                  (when (eq (char-before content-end) ?\n)
+                    (setq content-end (1- content-end)))
+                  (when (eq (char-before content-end) ?\r)
+                    (setq content-end (1- content-end)))
+                  (when (elatex-preview--context-contains-position-p
+                         begin end content-begin content-end position)
                     (let ((candidate
                            (elatex-preview--make-context
                             :begin begin :end end
@@ -297,15 +321,22 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
     (cons 1 (1- (length source))))
    ((and (string-prefix-p "\\(" source) (string-suffix-p "\\)" source))
     (cons 2 (- (length source) 2)))
-   ((and (string-prefix-p "\\[" source) (string-suffix-p "\\]" source))
-    (cons 2 (- (length source) 2)))
    ((string-match "\\`\\\\begin{\\([^}\n]+\\)}[ \t]*\n?" source)
     (let* ((name (match-string 1 source))
            (begin (match-end 0))
            (close (concat "\\end{" name "}")))
       (if (string-match
            (concat (regexp-quote close) "[ \t]*\n?\\'") source begin)
-          (cons begin (match-beginning 0))
+          (let ((end (match-beginning 0)))
+            (when (and (< begin end) (eq (aref source begin) ?\r))
+              (setq begin (1+ begin)))
+            (when (and (< begin end) (eq (aref source begin) ?\n))
+              (setq begin (1+ begin)))
+            (when (and (< begin end) (eq (aref source (1- end)) ?\n))
+              (setq end (1- end)))
+            (when (and (< begin end) (eq (aref source (1- end)) ?\r))
+              (setq end (1- end)))
+            (cons begin end))
         (cons 0 (length source)))))
    (t (cons 0 (length source)))))
 
@@ -330,8 +361,8 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
                      (bounds (elatex-preview--org-content-bounds source))
                      (content-begin (+ begin (car bounds)))
                      (content-end (+ begin (cdr bounds))))
-                (when (elatex-preview--content-at-position-p
-                       content-begin content-end position)
+                (when (elatex-preview--context-contains-position-p
+                       begin end content-begin content-end position)
                   (setq context
                         (elatex-preview--make-context
                          :begin begin :end end
@@ -394,24 +425,49 @@ column before its right border."
                lines "\n")
               "\n╰" horizontal "╯"))))
 
-(defun elatex-preview--format-after-string (output errors)
-  "Format boxed rendered OUTPUT and ordered ERRORS for an overlay after-string."
-  (let* ((boxed-output (elatex-preview--box-output output))
-         (error-text (and errors (mapconcat #'identity errors "; "))))
+(defun elatex-preview--format-payload (output errors)
+  "Format boxed OUTPUT and ordered ERRORS for either presentation backend."
+  (let ((boxed-output (elatex-preview--box-output output))
+        (error-text (and errors (mapconcat #'identity errors "; "))))
     (concat
      (unless (string-empty-p boxed-output)
-       (concat "\n"
-               (propertize boxed-output 'face 'elatex-preview-output-face)))
-     (when error-text
-       (concat "\n" (propertize error-text 'face 'error))))))
+       (propertize boxed-output 'face 'elatex-preview-output-face))
+     (when (and (not (string-empty-p boxed-output)) error-text) "\n")
+     (when error-text (propertize error-text 'face 'error)))))
 
-(defun elatex-preview--clear ()
-  "Remove the current preview overlay and cached signature."
+(defun elatex-preview--format-after-string (output errors)
+  "Format boxed OUTPUT and ERRORS for an overlay after-string."
+  (let ((payload (elatex-preview--format-payload output errors)))
+    (if (string-empty-p payload) "" (concat "\n" payload))))
+
+(defun elatex-preview--source-window ()
+  "Return the visible window displaying the current source buffer."
+  (let ((selected (selected-window)))
+    (if (eq (window-buffer selected) (current-buffer))
+        selected
+      (get-buffer-window (current-buffer) 'visible))))
+
+(defun elatex-preview--effective-backend ()
+  "Return the usable preview backend for the current source buffer."
+  (pcase elatex-preview-backend
+    ('after-string 'after-string)
+    ('child-frame
+     (let ((window (elatex-preview--source-window)))
+       (if (and window
+                (display-graphic-p (window-frame window))
+                (not elatex-preview--child-frame-failed))
+           'child-frame
+         'after-string)))
+    (_ (user-error "Unknown eLaTeX preview backend: %S"
+                   elatex-preview-backend))))
+
+(defun elatex-preview--after-string-hide ()
+  "Remove the after-string overlay."
   (when (overlayp elatex-preview--overlay)
     (delete-overlay elatex-preview--overlay))
-  (setq elatex-preview--overlay nil
-        elatex-preview--last-signature nil))
-(defun elatex-preview--show (context output errors)
+  (setq elatex-preview--overlay nil))
+
+(defun elatex-preview--after-string-show (context output errors)
   "Display OUTPUT and ERRORS for CONTEXT below its final source line."
   (let* ((position
           (save-excursion
@@ -427,7 +483,182 @@ column before its right border."
       (overlay-put elatex-preview--overlay 'priority 100))
     (move-overlay elatex-preview--overlay start position)
     (overlay-put elatex-preview--overlay 'after-string
-                 (elatex-preview--format-after-string output errors))))
+                 (elatex-preview--format-after-string output errors))
+    t))
+
+(defun elatex-preview--ensure-child-frame-buffer ()
+  "Return this source buffer's child-frame payload buffer."
+  (unless (buffer-live-p elatex-preview--child-frame-buffer)
+    (setq elatex-preview--child-frame-buffer
+          (generate-new-buffer " *elatex-preview-child-frame*"))
+    (with-current-buffer elatex-preview--child-frame-buffer
+      (setq-local buffer-undo-list t)
+      (setq-local cursor-type nil)
+      (setq-local mode-line-format nil)
+      (setq-local header-line-format nil)
+      (setq-local tab-line-format nil)
+      (setq-local truncate-lines t)))
+  elatex-preview--child-frame-buffer)
+
+(defun elatex-preview--child-frame-ensure (parent)
+  "Return a live child frame parented to PARENT."
+  (unless (frame-live-p elatex-preview--child-frame)
+    (setq elatex-preview--child-frame nil))
+  (when (and elatex-preview--child-frame
+             (not (eq (frame-parent elatex-preview--child-frame) parent)))
+    (delete-frame elatex-preview--child-frame t)
+    (setq elatex-preview--child-frame nil))
+  (unless elatex-preview--child-frame
+    (let ((child
+           (make-frame
+            `((parent-frame . ,parent)
+              (name . " *elatex-preview-child-frame*")
+              (minibuffer . nil)
+              (width . 1)
+              (height . 1)
+              (visibility . nil)
+              (undecorated . t)
+              (no-accept-focus . t)
+              (no-other-frame . t)
+              (skip-taskbar . t)
+              (unsplittable . t)
+              (desktop-dont-save . t)
+              (menu-bar-lines . 0)
+              (tool-bar-lines . 0)
+              (tab-bar-lines . 0)
+              (vertical-scroll-bars . nil)
+              (horizontal-scroll-bars . nil)
+              (left-fringe . 0)
+              (right-fringe . 0)
+              (internal-border-width . 1)))))
+      (set-window-buffer (frame-root-window child)
+                         (elatex-preview--ensure-child-frame-buffer))
+      (set-window-dedicated-p (frame-root-window child) t)
+      (setq elatex-preview--child-frame child)))
+  elatex-preview--child-frame)
+
+(defun elatex-preview--child-frame-position
+    (left line-top line-height child-width child-height parent-width parent-height)
+  "Return a child-frame position clamped inside parent pixel dimensions."
+  (let* ((max-left (max 0 (- parent-width child-width)))
+         (max-top (max 0 (- parent-height child-height)))
+         (x (max 0 (min left max-left)))
+         (preferred-top
+          (if (<= (+ line-top line-height child-height) parent-height)
+              (+ line-top line-height)
+            (- line-top child-height))))
+    (cons x (max 0 (min preferred-top max-top)))))
+
+(defun elatex-preview--child-frame-hide ()
+  "Hide the retained child frame, if any."
+  (when (frame-live-p elatex-preview--child-frame)
+    (make-frame-invisible elatex-preview--child-frame)))
+
+(defun elatex-preview--child-frame-destroy ()
+  "Destroy child-frame resources owned by this source buffer."
+  (when (frame-live-p elatex-preview--child-frame)
+    (delete-frame elatex-preview--child-frame t))
+  (when (buffer-live-p elatex-preview--child-frame-buffer)
+    (kill-buffer elatex-preview--child-frame-buffer))
+  (setq elatex-preview--child-frame nil
+        elatex-preview--child-frame-buffer nil))
+
+(defun elatex-preview--child-frame-show (_context output errors)
+  "Present OUTPUT and ERRORS in a child frame, or return nil without geometry."
+  (let ((payload (elatex-preview--format-payload output errors)))
+    (if (string-empty-p payload)
+        (progn
+          (elatex-preview--child-frame-hide)
+          t)
+      (let* ((source (elatex-preview--source-window))
+             (position (point))
+             (absolute
+              (and source
+                   (window-absolute-pixel-position position source))))
+        (if (null absolute)
+            (progn
+              (elatex-preview--child-frame-hide)
+              nil)
+          (let* ((parent (window-frame source))
+                 (buffer (elatex-preview--ensure-child-frame-buffer))
+                 (child (elatex-preview--child-frame-ensure parent))
+                 (line-height
+                  (with-selected-window source
+                    (save-excursion
+                      (goto-char position)
+                      (car (line-pixel-height))))))
+            (with-current-buffer buffer
+              (let ((inhibit-read-only t))
+                (erase-buffer)
+                (insert payload)
+                (setq-local buffer-read-only t)
+                (set-buffer-modified-p nil)))
+            (fit-frame-to-buffer child (frame-height parent) 1
+                                 (frame-width parent) 1)
+            (pcase-let* ((`(,parent-left ,parent-top ,parent-right ,parent-bottom)
+                           (frame-edges parent 'native-edges))
+                          (`(,x . ,y) absolute)
+                          (child-width (frame-pixel-width child))
+                          (child-height (frame-pixel-height child))
+                          (placement
+                           (elatex-preview--child-frame-position
+                            (- x parent-left) (- y parent-top) line-height
+                            child-width child-height
+                            (- parent-right parent-left)
+                            (- parent-bottom parent-top))))
+              (modify-frame-parameters
+               child `((left . ,(car placement)) (top . ,(cdr placement))))
+              (make-frame-visible child)
+              t)))))))
+
+(defun elatex-preview--backend-show (backend context output errors)
+  "Display CONTEXT OUTPUT and ERRORS through BACKEND."
+  (pcase backend
+    ('after-string (elatex-preview--after-string-show context output errors))
+    ('child-frame (elatex-preview--child-frame-show context output errors))))
+
+(defun elatex-preview--backend-hide (backend)
+  "Hide resources for BACKEND."
+  (pcase backend
+    ('after-string (elatex-preview--after-string-hide))
+    ('child-frame (elatex-preview--child-frame-hide))))
+
+(defun elatex-preview--backend-destroy (backend)
+  "Destroy resources for BACKEND."
+  (pcase backend
+    ('after-string (elatex-preview--after-string-hide))
+    ('child-frame (elatex-preview--child-frame-destroy))))
+
+(defun elatex-preview--clear ()
+  "Hide the active preview and discard its cached render."
+  (when elatex-preview--active-backend
+    (elatex-preview--backend-hide elatex-preview--active-backend))
+  (setq elatex-preview--active-backend nil
+        elatex-preview--last-signature nil
+        elatex-preview--last-output nil
+        elatex-preview--last-errors nil))
+
+(defun elatex-preview--show (context output errors)
+  "Present CONTEXT OUTPUT and ERRORS through the effective backend."
+  (let ((backend (elatex-preview--effective-backend)))
+    (when (and elatex-preview--active-backend
+               (not (eq elatex-preview--active-backend backend)))
+      (elatex-preview--backend-hide elatex-preview--active-backend))
+    (if (eq backend 'child-frame)
+        (condition-case error-data
+            (if (elatex-preview--backend-show backend context output errors)
+                (setq elatex-preview--active-backend backend)
+              (elatex-preview--backend-show 'after-string context output errors)
+              (setq elatex-preview--active-backend 'after-string))
+          (error
+           (elatex-preview--child-frame-destroy)
+           (setq elatex-preview--child-frame-failed t)
+           (message "eLaTeX child-frame preview failed; using after-string: %s"
+                    (error-message-string error-data))
+           (elatex-preview--backend-show 'after-string context output errors)
+           (setq elatex-preview--active-backend 'after-string)))
+      (elatex-preview--backend-show backend context output errors)
+      (setq elatex-preview--active-backend backend))))
 
 (defun elatex-preview-refresh ()
   "Synchronously refresh the math preview at point."
@@ -447,18 +678,20 @@ column before its right border."
         (unless (equal signature elatex-preview--last-signature)
           (setq elatex-preview--last-signature signature)
           (condition-case error-data
-              (let* ((result
-                      (elatex-render
-                       (elatex-preview--context-content context)
-                       :style elatex-preview-style
-                       :font elatex-preview-font
-                       :line-width elatex-preview-line-width))
-                     (output (elatex-result-output result))
-                     (errors (elatex-result-errors result)))
-                (elatex-preview--show context output errors))
+              (let ((result
+                     (elatex-render
+                      (elatex-preview--context-content context)
+                      :style elatex-preview-style
+                      :font elatex-preview-font
+                      :line-width elatex-preview-line-width)))
+                (setq elatex-preview--last-output (elatex-result-output result)
+                      elatex-preview--last-errors (elatex-result-errors result)))
             (error
-             (elatex-preview--show
-              context "" (list (error-message-string error-data))))))))))
+             (setq elatex-preview--last-output ""
+                   elatex-preview--last-errors
+                   (list (error-message-string error-data))))))
+        (elatex-preview--show context elatex-preview--last-output
+                              elatex-preview--last-errors)))))
 
 (defun elatex-preview--timer-fire (buffer)
   "Refresh the preview in BUFFER after an idle delay."
@@ -481,21 +714,25 @@ column before its right border."
                                (current-buffer)))))
 
 (defun elatex-preview--disable ()
-  "Remove hooks, timers, and overlays owned by the preview mode."
+  "Remove hooks, timers, and presentation resources owned by preview mode."
   (remove-hook 'post-command-hook #'elatex-preview--schedule-update t)
   (remove-hook 'after-change-functions #'elatex-preview--schedule-update t)
+  (remove-hook 'kill-buffer-hook #'elatex-preview--disable t)
   (when (timerp elatex-preview--timer)
     (cancel-timer elatex-preview--timer))
   (setq elatex-preview--timer nil)
-  (elatex-preview--clear))
+  (elatex-preview--clear)
+  (elatex-preview--backend-destroy 'after-string)
+  (elatex-preview--backend-destroy 'child-frame)
+  (setq elatex-preview--child-frame-failed nil))
 
 ;;;###autoload
 (define-minor-mode elatex-preview-mode
   "Preview the TeX-like mathematical expression containing point.
 
-The preview appears below the expression's final source line and updates after
-point movement or buffer edits.  Supported major modes are controlled by
-`elatex-preview-supported-modes'."
+Graphical source frames use a child frame near point; terminals use an
+after-string below the expression's final source line.  Supported major modes
+are controlled by `elatex-preview-supported-modes'."
   :lighter " eL"
   :group 'elatex-preview
   (if elatex-preview-mode
@@ -505,6 +742,7 @@ point movement or buffer edits.  Supported major modes are controlled by
             (user-error "eLaTeX preview does not support %s" major-mode))
         (add-hook 'post-command-hook #'elatex-preview--schedule-update nil t)
         (add-hook 'after-change-functions #'elatex-preview--schedule-update nil t)
+        (add-hook 'kill-buffer-hook #'elatex-preview--disable nil t)
         (elatex-preview--schedule-update))
     (elatex-preview--disable)))
 
