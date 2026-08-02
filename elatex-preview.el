@@ -96,6 +96,11 @@ the terminal-safe `after-string' backend."
   "Face used for rendered preview text."
   :group 'elatex-preview)
 
+(defface elatex-preview-border-face
+  '((t :inherit shadow))
+  "Face whose foreground colors the child-frame border."
+  :group 'elatex-preview)
+
 (cl-defstruct (elatex-preview--context
                (:constructor elatex-preview--make-context))
   begin end content-begin content-end content)
@@ -321,6 +326,8 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
     (cons 1 (1- (length source))))
    ((and (string-prefix-p "\\(" source) (string-suffix-p "\\)" source))
     (cons 2 (- (length source) 2)))
+   ((and (string-prefix-p "\\[" source) (string-suffix-p "\\]" source))
+    (cons 2 (- (length source) 2)))
    ((string-match "\\`\\\\begin{\\([^}\n]+\\)}[ \t]*\n?" source)
     (let* ((name (match-string 1 source))
            (begin (match-end 0))
@@ -509,30 +516,37 @@ column before its right border."
     (delete-frame elatex-preview--child-frame t)
     (setq elatex-preview--child-frame nil))
   (unless elatex-preview--child-frame
-    (let ((child
-           (make-frame
-            `((parent-frame . ,parent)
-              (name . " *elatex-preview-child-frame*")
-              (minibuffer . nil)
-              (width . 1)
-              (height . 1)
-              (visibility . nil)
-              (undecorated . t)
-              (no-accept-focus . t)
-              (no-other-frame . t)
-              (skip-taskbar . t)
-              (unsplittable . t)
-              (desktop-dont-save . t)
-              (menu-bar-lines . 0)
-              (tool-bar-lines . 0)
-              (tab-bar-lines . 0)
-              (vertical-scroll-bars . nil)
-              (horizontal-scroll-bars . nil)
-              (left-fringe . 0)
-              (right-fringe . 0)
-              (internal-border-width . 1)))))
-      (set-window-buffer (frame-root-window child)
-                         (elatex-preview--ensure-child-frame-buffer))
+    ;; `make-frame' can change the current buffer.  Capture the source
+    ;; buffer's payload buffer before creating the child frame.
+    (let* ((buffer (elatex-preview--ensure-child-frame-buffer))
+           (child
+            (save-current-buffer
+              (make-frame
+               `((parent-frame . ,parent)
+                 (name . " *elatex-preview-child-frame*")
+                 (minibuffer . nil)
+                 (width . 1)
+                 (height . 1)
+                 (visibility . nil)
+                 (undecorated . t)
+                 (no-accept-focus . t)
+                 (no-other-frame . t)
+                 (skip-taskbar . t)
+                 (unsplittable . t)
+                 (desktop-dont-save . t)
+                 (menu-bar-lines . 0)
+                 (tool-bar-lines . 0)
+                 (tab-bar-lines . 0)
+                 (vertical-scroll-bars . nil)
+                 (horizontal-scroll-bars . nil)
+                 (left-fringe . 0)
+                 (right-fringe . 0)
+                 (internal-border-width . 1))))))
+      (set-face-background
+       'child-frame-border
+       (face-foreground 'elatex-preview-border-face child t)
+       child)
+      (set-window-buffer (frame-root-window child) buffer)
       (set-window-dedicated-p (frame-root-window child) t)
       (setq elatex-preview--child-frame child)))
   elatex-preview--child-frame)
@@ -550,22 +564,22 @@ column before its right border."
     (cons x (max 0 (min preferred-top max-top)))))
 
 (defun elatex-preview--child-frame-fit (child)
-  "Resize CHILD so its visible window contains the rendered payload."
+  "Fit CHILD to its payload, subject to Emacs' safe window minimum."
   (let* ((window (frame-root-window child))
          (size (window-text-pixel-size window t t t))
-         (width (max 1 (car size)))
-         (height (max 1 (cdr size))))
-    (set-frame-size child width height t)
-    ;; Pixelwise frame requests may be rounded down by a window manager or
-    ;; consumed by frame chrome.  Correct from the actual visible dimensions
-    ;; so the final glyph is never clipped.
-    (let ((width-deficit (- width (window-pixel-width window)))
-          (height-deficit (- height (window-pixel-height window))))
-      (when (or (> width-deficit 0) (> height-deficit 0))
-        (set-frame-size child
-                        (+ (frame-pixel-width child) (max 0 width-deficit))
-                        (+ (frame-pixel-height child) (max 0 height-deficit))
-                        t)))))
+         ;; With zero fringes Emacs reserves the last body column for a
+         ;; truncation glyph.  Include that column or the payload's final
+         ;; character is displayed as `$'.
+         (width (max (+ (car size) (frame-char-width child))
+                     (window-safe-min-pixel-size window t)))
+         (height (max (cdr size) (window-safe-min-pixel-size window nil))))
+    ;; `set-frame-size' otherwise applies the user's character-grid minimums
+    ;; and rounding even to a pixelwise request.  Use Emacs' absolute safe
+    ;; window minimums and disable grid rounding for this single resize.
+    (let ((frame-resize-pixelwise t)
+          (window-min-width window-safe-min-width)
+          (window-min-height window-safe-min-height))
+      (set-frame-size child width height t))))
 
 (defun elatex-preview--child-frame-hide ()
   "Hide the retained child frame, if any."
@@ -574,12 +588,15 @@ column before its right border."
 
 (defun elatex-preview--child-frame-destroy ()
   "Destroy child-frame resources owned by this source buffer."
-  (when (frame-live-p elatex-preview--child-frame)
-    (delete-frame elatex-preview--child-frame t))
-  (when (buffer-live-p elatex-preview--child-frame-buffer)
-    (kill-buffer elatex-preview--child-frame-buffer))
-  (setq elatex-preview--child-frame nil
-        elatex-preview--child-frame-buffer nil))
+  (let ((child elatex-preview--child-frame)
+        (buffer elatex-preview--child-frame-buffer))
+    (when (frame-live-p child)
+      (save-current-buffer
+        (delete-frame child t)))
+    (when (buffer-live-p buffer)
+      (kill-buffer buffer))
+    (setq elatex-preview--child-frame nil
+          elatex-preview--child-frame-buffer nil)))
 
 (defun elatex-preview--child-frame-show (_context output errors)
   "Present OUTPUT and ERRORS in a child frame, or return nil without geometry."
