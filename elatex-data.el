@@ -4406,6 +4406,67 @@
  39])
   "Pinned ASCII-preferred drawing style.")
 
+(defconst elatex--mathjax-symbols
+  '[["\\#" 35]
+    ["\\$" 36]
+    ["\\%" 37]
+    ["\\&" 38]
+    ["\\centerdot" 8901]
+    ["\\colon" 58]
+    ["\\doteqdot" 8785]
+    ["\\dotsb" 8943]
+    ["\\dotsc" 8230]
+    ["\\dotsi" 8943]
+    ["\\dotsm" 8943]
+    ["\\dotso" 8230]
+    ["\\doublecap" 8914]
+    ["\\doublecup" 8915]
+    ["\\gets" 8592]
+    ["\\gggtr" 8921]
+    ["\\gt" 62]
+    ["\\intop" 8747]
+    ["\\land" 8743]
+    ["\\ldotp" 46]
+    ["\\llless" 8920]
+    ["\\lnot" 172]
+    ["\\lor" 8744]
+    ["\\lt" 60]
+    ["\\ngeqq" 8817]
+    ["\\nleqq" 8816]
+    ["\\nshortmid" 8740]
+    ["\\nshortparallel" 8742]
+    ["\\ointop" 8750]
+    ["\\omicron" 959]
+    ["\\owns" 8715]
+    ["\\restriction" 8638]
+    ["\\shortmid" 8739]
+    ["\\shortparallel" 8741]
+    ["\\smallfrown" 8994]
+    ["\\smallint" 8747]
+    ["\\smallsmile" 8995]
+    ["\\thickapprox" 8776]
+    ["\\thicksim" 8764]
+    ["\\unlhd" 8884]
+    ["\\unrhd" 8885]
+    ["\\varDelta" #x1D6E5]
+    ["\\varGamma" #x1D6E4]
+    ["\\varLambda" #x1D6EC]
+    ["\\varOmega" #x1D6FA]
+    ["\\varPhi" #x1D6F7]
+    ["\\varPi" #x1D6F1]
+    ["\\varPsi" #x1D6F9]
+    ["\\varSigma" #x1D6F4]
+    ["\\varUpsilon" #x1D6F6]
+    ["\\varXi" #x1D6EF]
+    ["\\varpropto" 8733]
+    ["\\varsubsetneq" 8842]
+    ["\\varsupsetneqq" 10956]]
+  "MathJax 4.1.3 base and AMS glyph commands absent from the pinned table.
+
+The source is tag 4.1.3, revision
+fb987178c2d279a99b0db5ea02e751691703955e.  These records extend command
+recognition only; `elatex--symbols' remains the exact upstream inventory.")
+
 (defun elatex--make-first-index (records)
   "Build a first-entry-wins string index for RECORDS."
   (let ((table (make-hash-table :test #'equal)))
@@ -4419,6 +4480,10 @@
 
 (defconst elatex--symbol-index (elatex--make-first-index elatex--symbols)
   "First-entry-wins exact symbol-command index.")
+
+(defconst elatex--mathjax-symbol-index
+  (elatex--make-first-index elatex--mathjax-symbols)
+  "Exact MathJax compatibility symbol-command index.")
 
 (defconst elatex--environment-index (elatex--make-first-index elatex--environments)
   "First-entry-wins exact environment index.")

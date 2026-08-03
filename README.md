@@ -57,6 +57,13 @@ Translated compatibility entry points are also available:
 - `elatex-errors`, `elatex-errors-string`, and `elatex-error-state`
 - `elatex-box-tree` for inspecting the retained layout tree
 
+Command recognition additionally covers the single-glyph and delimiter names
+from the MathJax 4.1.3 TeX `base` and `ams` registries.  This compatibility
+layer supplies semantic Unicode equivalents only: MathJax layout macros,
+operator sizing, variant glyph forms, and delimiter stretching are outside its
+scope.  The translated 2,916-entry symbol-list APIs remain pinned exactly to
+`libtexprintf`.
+
 ## Live preview mode
 
 `elatex-preview` provides realtime output for `markdown-mode`,

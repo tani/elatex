@@ -90,7 +90,8 @@
 (defun elatex--lookup-symbol (string begin)
   "Look up an exact symbol command in STRING at BEGIN."
   (let ((end (elatex--symbol-command-end string begin)))
-    (gethash (substring string begin end) elatex--symbol-index)))
+    (or (gethash (substring string begin end) elatex--symbol-index)
+        (gethash (substring string begin end) elatex--mathjax-symbol-index))))
 
 (defun elatex--lookup-font (name)
   "Translate root font NAME to its parser identity with recovery."
@@ -813,13 +814,25 @@ Return vector [CELLS END NC HSEP]."
                 (let ((symbol (elatex--lookup-symbol string position)))
                   (if symbol
                       (let ((code (aref symbol 1))
-                            (name (aref symbol 0)))
-                        (if (elatex--combining-mark-p code)
-                            (push code pending)
-                          (emit (char-to-string code))
+                            (name (aref symbol 0))
+                            literal-command)
+                        (setq literal-command
+                              (and (= (length name) 2)
+                                   (= (elatex--command-char-kind
+                                       (aref name 1))
+                                      0)))
+                        (cond
+                         (literal-command
+                          (emit name)
                           (flush))
+                         ((elatex--combining-mark-p code)
+                          (push code pending))
+                         (t
+                          (emit (char-to-string code))
+                          (flush)))
                         (setq position (+ position (length name)))
-                        (when (and (< position length)
+                        (when (and (not literal-command)
+                                   (< position length)
                                    (= (aref string position) ?\s))
                           (setq position (1+ position))))
                     (emit "\\")
