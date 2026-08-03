@@ -148,6 +148,7 @@
 (defconst elatex--pd-nspace 126)
 (defconst elatex--pd-prime 127)
 (defconst elatex--pd-none 128)
+(defconst elatex--pd-prooftree 129)
 
 (defconst elatex--f-roman 0)
 (defconst elatex--f-italic 1)
@@ -185,6 +186,7 @@
 (defconst elatex--b-dummy 3)
 (defconst elatex--b-line 4)
 (defconst elatex--b-endline 5)
+(defconst elatex--b-proof 6)
 
 (defconst elatex--init 0)
 (defconst elatex--sizeknown 1)
@@ -392,6 +394,7 @@
  ["Vmatrix" 116 0 1]
  ["matrix*" 117 0 1]
  ["matrix" 117 0 1]
+ ["prooftree" 129 0 0]
  ["\\begin" 102 0 0]
  ["\\end" 103 0 0]
  ["\\hline" 118 0 0]]
@@ -4096,7 +4099,9 @@
   prime
   dprime
   tprime
-  qprime)
+  qprime
+  proof-solid
+  proof-dashed)
 
 (defconst elatex--style-unicode-template
   (elatex--make-style
@@ -4249,7 +4254,9 @@
  8279
  0
  0
- 0])
+ 0]
+   :proof-solid "─"
+   :proof-dashed "┄")
   "Pinned Unicode drawing style.")
 
 (defconst elatex--style-ascii-template
@@ -4403,7 +4410,9 @@
  39
  39
  39
- 39])
+ 39]
+   :proof-solid "-"
+   :proof-dashed "- ")
   "Pinned ASCII-preferred drawing style.")
 
 (defconst elatex--mathjax-symbols

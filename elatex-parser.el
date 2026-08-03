@@ -22,6 +22,47 @@
 (defvar elatex--root-font elatex--pd-text
   "Resolved root font identity for the current parse.")
 
+(defconst elatex--proof-commands
+  '[["\\AxiomC" axiom 1 nil]
+    ["\\AXC" axiom 1 nil]
+    ["\\UnaryInfC" inference 1 1]
+    ["\\UIC" inference 1 1]
+    ["\\BinaryInfC" inference 1 2]
+    ["\\BIC" inference 1 2]
+    ["\\TrinaryInfC" inference 1 3]
+    ["\\TIC" inference 1 3]
+    ["\\QuaternaryInfC" inference 1 4]
+    ["\\QuinaryInfC" inference 1 5]
+    ["\\LeftLabel" label 1 left]
+    ["\\LL" label 1 left]
+    ["\\RightLabel" label 1 right]
+    ["\\RL" label 1 right]
+    ["\\noLine" line 0 none]
+    ["\\singleLine" line 0 solid]
+    ["\\solidLine" line 0 solid]
+    ["\\dashedLine" line 0 dashed]
+    ["\\alwaysNoLine" always-line 0 none]
+    ["\\alwaysSingleLine" always-line 0 solid]
+    ["\\alwaysSolidLine" always-line 0 solid]
+    ["\\alwaysDashedLine" always-line 0 dashed]
+    ["\\rootAtTop" root 0 top]
+    ["\\alwaysRootAtTop" root 0 top]
+    ["\\rootAtBottom" root 0 bottom]
+    ["\\alwaysRootAtBottom" root 0 bottom]]
+  "MathJax 4.1.3 centered-proof command records.")
+
+(defconst elatex--proof-command-index
+  (elatex--make-first-index elatex--proof-commands)
+  "Exact environment-local bussproofs command index.")
+
+(cl-defstruct (elatex--proof-state (:constructor elatex--make-proof-state))
+  stack
+  left-label
+  right-label
+  (default-line 'solid)
+  (current-line 'solid)
+  root-at-top)
+
 (defun elatex--last-child (box)
   "Return the last child of BOX."
   (elatex--box-child box (1- (elatex--box-child-count box))))
@@ -54,6 +95,184 @@
   (let ((index (elatex--box-child-count box)))
     (elatex--add-unit box (char-to-string character))
     (elatex--set-child-position box index x y)))
+
+(defun elatex--proof-source-box (source font &optional pad)
+  "Parse proof SOURCE in FONT, optionally adding horizontal PAD cells."
+  (let ((line (elatex--init-box nil elatex--b-line (vector 0))))
+    (elatex--parse-string-recursive source line font)
+    (elatex--box-pos line)
+    (elatex--box-set-state line elatex--sizeknown)
+    (if (or (not pad) (= (elatex--box-width line) 0))
+        line
+      (let ((wrapper (elatex--init-box nil elatex--b-pos (make-vector 4 0))))
+        (elatex--append-child-box wrapper line)
+        (elatex--add-child wrapper elatex--b-dummy (vector pad 0))
+        (elatex--set-child-position wrapper 0 pad 0)
+        (elatex--set-child-position
+         wrapper 1 (+ pad (elatex--box-width line)) 0)
+        (elatex--box-pos wrapper)
+        (setf (elatex--box-y-center wrapper) (elatex--box-y-center line)
+              (elatex--box-y-align wrapper) elatex--fix)
+        (elatex--box-set-state wrapper elatex--sizeknown)
+        wrapper))))
+
+(defun elatex--proof-line-pattern (style)
+  "Return the current drawing pattern for proof line STYLE."
+  (pcase style
+    ('none "")
+    ('dashed (elatex--style-proof-dashed elatex--style))
+    (_ (elatex--style-proof-solid elatex--style))))
+
+(defun elatex--proof-make-inference (state arity source font)
+  "Apply an ARITY inference with SOURCE to proof STATE in FONT."
+  (let ((stack (elatex--proof-state-stack state)))
+    (if (< (length stack) arity)
+        (elatex--add-error elatex--errtoofewmandarg)
+      (let* ((popped (cl-subseq stack 0 arity))
+             (premises (nreverse popped)))
+        (when (= arity 1)
+          (elatex--box-pos (car premises))
+          (elatex--box-set-state (car premises) elatex--sizeknown))
+        (let* ((empty-unary
+                (and (= arity 1)
+                     (= (elatex--box-width (car premises)) 0)
+                     (= (elatex--box-height (car premises)) 0)))
+               (premise-count (if empty-unary 0 arity))
+               (proof (elatex--init-box nil elatex--b-proof nil)))
+          (setf (elatex--proof-state-stack state) (nthcdr arity stack))
+          (unless empty-unary
+            (dolist (premise premises)
+              (elatex--append-child-box proof premise)))
+          (let ((conclusion-index (elatex--box-child-count proof))
+                left-index right-index)
+            (elatex--append-child-box
+             proof (elatex--proof-source-box source font 1))
+            (let ((rule-index (elatex--box-child-count proof)))
+              (elatex--add-child proof elatex--b-unit "")
+              (when (elatex--proof-state-left-label state)
+                (setq left-index (elatex--box-child-count proof))
+                (elatex--append-child-box
+                 proof
+                 (elatex--proof-source-box
+                  (elatex--proof-state-left-label state) font)))
+              (when (elatex--proof-state-right-label state)
+                (setq right-index (elatex--box-child-count proof))
+                (elatex--append-child-box
+                 proof
+                 (elatex--proof-source-box
+                  (elatex--proof-state-right-label state) font)))
+              (setf (elatex--box-content proof)
+                    (elatex--make-proof-layout
+                     :premise-count premise-count
+                     :conclusion-index conclusion-index
+                     :rule-index rule-index
+                     :left-label-index left-index
+                     :right-label-index right-index
+                     :rule-pattern
+                     (elatex--proof-line-pattern
+                      (elatex--proof-state-current-line state))
+                     :root-at-top (elatex--proof-state-root-at-top state))
+                    (elatex--proof-state-left-label state) nil
+                    (elatex--proof-state-right-label state) nil
+                    (elatex--proof-state-current-line state)
+                    (elatex--proof-state-default-line state)
+                    (elatex--proof-state-stack state)
+                    (cons proof (elatex--proof-state-stack state))))))))))
+
+(defun elatex--proof-apply-command (state record argument font)
+  "Apply proof command RECORD with ARGUMENT to STATE in FONT."
+  (let ((kind (aref record 1))
+        (value (aref record 3)))
+    (pcase kind
+      ('axiom
+       (setf (elatex--proof-state-stack state)
+             (cons (elatex--proof-source-box argument font 1)
+                   (elatex--proof-state-stack state))))
+      ('inference
+       (elatex--proof-make-inference state value argument font))
+      ('label
+       (if (eq value 'left)
+           (setf (elatex--proof-state-left-label state) argument)
+         (setf (elatex--proof-state-right-label state) argument)))
+      ('line
+       (setf (elatex--proof-state-current-line state) value))
+      ('always-line
+       (setf (elatex--proof-state-default-line state) value
+             (elatex--proof-state-current-line state) value))
+      ('root
+       (setf (elatex--proof-state-root-at-top state) (eq value 'top))))))
+
+(defun elatex--proof-group-end (source begin)
+  "Return the position after SOURCE's balanced group at BEGIN."
+  (let ((position (1+ begin))
+        (depth 1)
+        (length (length source)))
+    (while (and (< position length) (> depth 0))
+      (pcase (aref source position)
+        (?{ (setq depth (1+ depth)))
+        (?} (setq depth (1- depth))))
+      (setq position (1+ position)))
+    position))
+
+(defun elatex--proof-dollar-end (source begin)
+  "Return the position after SOURCE's next dollar following BEGIN."
+  (let ((position (1+ begin))
+        (length (length source)))
+    (while (and (< position length) (/= (aref source position) ?$))
+      (setq position (1+ position)))
+    (min length (1+ position))))
+
+(defun elatex--make-proof-tree (token parent font)
+  "Parse centered bussproofs TOKEN into PARENT using FONT."
+  (let* ((source (aref (elatex--token-args token) 0))
+         (length (length source))
+         (position 0)
+         (ordinary-start 0)
+         ordinary
+         (state (elatex--make-proof-state)))
+    (while (< position length)
+      (cond
+       ((= (aref source position) ?{)
+        (setq position (elatex--proof-group-end source position)))
+       ((= (aref source position) ?$)
+        (setq position (elatex--proof-dollar-end source position)))
+       ((and (= (aref source position) ?\\)
+             (elatex--environment-command-p source position "\\begin"))
+        (setq position (elatex--matching-environment-end source position)))
+       ((= (aref source position) ?\\)
+        (let* ((end (elatex--command-end source position))
+               (record
+                (and end
+                     (gethash (substring source position end)
+                              elatex--proof-command-index))))
+          (if (null record)
+              (setq position
+                    (if (and end (= end (1+ position)) (< end length))
+                        (1+ end)
+                      (or end (1+ position))))
+            (push (substring source ordinary-start position) ordinary)
+            (let ((next end) argument valid)
+              (if (= (aref record 2) 0)
+                  (setq valid t)
+                (let ((parsed (elatex--argument source end)))
+                  (if (car parsed)
+                      (setq argument (car parsed)
+                            next (cdr parsed)
+                            valid t)
+                    (elatex--add-error elatex--errtoofewmandarg))))
+              (when valid
+                (elatex--proof-apply-command state record argument font))
+              (setq position next
+                    ordinary-start next)))))
+       (t
+        (setq position (1+ position)))))
+    (push (substring source ordinary-start) ordinary)
+    (let ((prefix (string-trim (apply #'concat (nreverse ordinary)))))
+      (unless (string-empty-p prefix)
+        (elatex--append-child-box parent
+                                  (elatex--proof-source-box prefix font))))
+    (dolist (root (nreverse (elatex--proof-state-stack state)))
+      (elatex--append-child-box parent root))))
 
 (defun elatex--mappable-tree-p (box predicate)
   "Implement IsMappableLineBoxtree for BOX using PREDICATE."
@@ -963,6 +1182,8 @@
          ((= identity elatex--pd-vmatrix) (elatex--make-array token line font "|" "|"))
          ((= identity elatex--pd-vvmatrix) (elatex--make-array token line font "‖" "‖"))
          ((= identity elatex--pd-matrix) (elatex--make-array token line font "." "."))
+         ((= identity elatex--pd-prooftree)
+          (elatex--make-proof-tree token line font))
          ((= identity elatex--pd-box) (elatex--make-dummy-box token line font))
          ((= identity elatex--pd-kern) (elatex--make-kern token line font))
          ((= identity elatex--pd-phantom) (elatex--make-phantom token line font t t))

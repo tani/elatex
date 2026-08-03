@@ -40,6 +40,39 @@
                  "╭────╮\n│ a  │\n│ bc │\n╰────╯"))
   (should (equal (elatex-preview--box-output "") "")))
 
+(ert-deftest elatex-preview/prooftree-preserves-environment-wrapper ()
+  (with-temp-buffer
+    (setq major-mode 'latex-mode)
+    (insert "\\begin{prooftree}\n"
+            "\\AxiomC{A}\\AxiomC{B}\\BinaryInfC{C}\n"
+            "\\end{prooftree}")
+    (goto-char (point-min))
+    (search-forward "AxiomC")
+    (let ((context (elatex-preview--context-at-point)))
+      (should context)
+      (should
+       (equal (elatex-preview--context-content context)
+              (concat "\\begin{prooftree}\n"
+                      "\\AxiomC{A}\\AxiomC{B}\\BinaryInfC{C}\n"
+                      "\\end{prooftree}"))))
+    (let ((elatex-preview-idle-delay 0)
+          (elatex-preview-backend 'after-string))
+      (unwind-protect
+          (progn
+            (elatex-preview-mode 1)
+            (elatex-preview-refresh)
+            (should (overlayp elatex-preview--overlay))
+            (should
+             (equal
+              (substring-no-properties
+               (overlay-get elatex-preview--overlay 'after-string))
+              (concat "\n╭─────────╮\n"
+                      "│  A   B  │\n"
+                      "│ ─────── │\n"
+                      "│    C    │\n"
+                      "╰─────────╯"))))
+        (elatex-preview-mode -1)))))
+
 (ert-deftest elatex-preview/child-frame-payload-is-unboxed ()
   (let ((payload (elatex-preview--format-payload
                   "a+b" '("First error" "Second error"))))

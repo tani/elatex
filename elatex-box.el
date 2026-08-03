@@ -38,6 +38,16 @@
   (x-center 0 :type integer)
   (y-center 0 :type integer))
 
+(cl-defstruct (elatex--proof-layout
+               (:constructor elatex--make-proof-layout))
+  (premise-count 0 :type integer)
+  (conclusion-index 0 :type integer)
+  (rule-index 0 :type integer)
+  left-label-index
+  right-label-index
+  (rule-pattern "" :type string)
+  root-at-top)
+
 (defun elatex--c-truncate (number)
   "Truncate NUMBER toward zero as a C integer conversion does."
   (if (< number 0) (ceiling number) (floor number)))
@@ -62,8 +72,8 @@
   "Return child INDEX of BOX."
   (aref (elatex--box-children box) index))
 
-(defun elatex--add-child (parent type content)
-  "Append a child of TYPE and CONTENT to PARENT and return it."
+(defun elatex--append-child-box (parent child)
+  "Append existing CHILD to PARENT and return CHILD."
   (let* ((count (elatex--box-child-count parent))
          (children (elatex--box-children parent))
          (capacity (length children)))
@@ -74,10 +84,14 @@
           (aset new-children index (aref children index)))
         (setq children new-children)
         (setf (elatex--box-children parent) children)))
-    (let ((child (elatex--init-box parent type content)))
-      (aset children count child)
-      (setf (elatex--box-child-count parent) (1+ count))
-      child)))
+    (setf (elatex--box-parent child) parent)
+    (aset children count child)
+    (setf (elatex--box-child-count parent) (1+ count))
+    child))
+
+(defun elatex--add-child (parent type content)
+  "Append a child of TYPE and CONTENT to PARENT and return it."
+  (elatex--append-child-box parent (elatex--init-box parent type content)))
 
 (defun elatex--box-in-box (box type content)
   "Wrap non-root BOX in a new box of TYPE carrying CONTENT.
@@ -385,6 +399,135 @@ When PRESERVE-SINGLE-LINE-BASELINE is non-nil, the caller sets Y center."
         (elatex--set-alignment-centers box nil))
       0))))
 
+(defun elatex--proof-rule-string (pattern width)
+  "Repeat proof rule PATTERN to exactly WIDTH cells."
+  (if (string-empty-p pattern)
+      (make-string width ?\s)
+    (let ((result ""))
+      (while (< (length result) width)
+        (setq result (concat result pattern)))
+      (substring result 0 width))))
+
+(defun elatex--proof-box-size (box)
+  "Compute retained proof BOX geometry; return zero on success."
+  (cond
+   ((/= (elatex--box-type box) elatex--b-proof)
+    (elatex--add-error elatex--errunknownbox) 1)
+   ((/= (elatex--box-size-children box) 0) 1)
+   (t
+    (let* ((layout (elatex--box-content box))
+           (premise-count (elatex--proof-layout-premise-count layout))
+           (conclusion
+            (elatex--box-child box
+                               (elatex--proof-layout-conclusion-index layout)))
+           (rule
+            (elatex--box-child box (elatex--proof-layout-rule-index layout)))
+           (premise-height 0)
+           (premise-width 0)
+           first-axis last-axis premise-axis
+           premise-left premise-right)
+      (dotimes (index premise-count)
+        (let ((premise (elatex--box-child box index)))
+          (setf (elatex--box-rx premise) premise-width)
+          (let ((axis (+ premise-width (elatex--box-x-center premise))))
+            (unless first-axis (setq first-axis axis))
+            (setq last-axis axis))
+          (setq premise-width (+ premise-width (elatex--box-width premise))
+                premise-height (max premise-height
+                                    (elatex--box-height premise)))
+          (when (< index (1- premise-count))
+            (setq premise-width (1+ premise-width)))))
+      (if (> premise-count 0)
+          (setq premise-axis (elatex--c-div (+ first-axis last-axis) 2)
+                premise-left premise-axis
+                premise-right (max 0 (1- (- premise-width premise-axis))))
+        (setq premise-axis (elatex--box-x-center conclusion)
+              premise-left 0
+              premise-right 0))
+      (let* ((conclusion-left (elatex--box-x-center conclusion))
+             (conclusion-right
+              (max 0 (1- (- (elatex--box-width conclusion)
+                            conclusion-left))))
+             (rule-left (max premise-left conclusion-left))
+             (rule-right (max premise-right conclusion-right))
+             (rule-width (max 1 (+ 1 rule-left rule-right)))
+             (premise-shift (- rule-left premise-axis))
+             (conclusion-x (- rule-left conclusion-left))
+             (rule-y (if (elatex--proof-layout-root-at-top layout)
+                         premise-height
+                       (elatex--box-height conclusion)))
+             (premise-y (if (elatex--proof-layout-root-at-top layout)
+                            0
+                          (1+ rule-y)))
+             (conclusion-y (if (elatex--proof-layout-root-at-top layout)
+                               (1+ rule-y)
+                             0))
+             (minimum-x 0)
+             (maximum-x rule-width)
+             (minimum-y 0)
+             (maximum-y (+ conclusion-y (elatex--box-height conclusion))))
+        (setf (elatex--box-content rule)
+              (elatex--proof-rule-string
+               (elatex--proof-layout-rule-pattern layout) rule-width)
+              (elatex--box-width rule) rule-width
+              (elatex--box-height rule) 1
+              (elatex--box-x-center rule) (elatex--c-div (1- rule-width) 2)
+              (elatex--box-y-center rule) 0
+              (elatex--box-rx rule) 0
+              (elatex--box-ry rule) rule-y
+              (elatex--box-state rule) elatex--relposknown)
+        (setq maximum-y (max maximum-y (1+ rule-y)))
+        (dotimes (index premise-count)
+          (let ((premise (elatex--box-child box index)))
+            (cl-incf (elatex--box-rx premise) premise-shift)
+            (setf (elatex--box-ry premise)
+                  (if (elatex--proof-layout-root-at-top layout)
+                      (- premise-height (elatex--box-height premise))
+                    premise-y)
+                  (elatex--box-state premise) elatex--relposknown)
+            (setq minimum-x (min minimum-x (elatex--box-rx premise))
+                  maximum-x (max maximum-x
+                                 (+ (elatex--box-rx premise)
+                                    (elatex--box-width premise)))
+                  maximum-y (max maximum-y
+                                 (+ (elatex--box-ry premise)
+                                    (elatex--box-height premise))))))
+        (setf (elatex--box-rx conclusion) conclusion-x
+              (elatex--box-ry conclusion) conclusion-y
+              (elatex--box-state conclusion) elatex--relposknown)
+        (dolist (entry
+                 (list
+                  (cons 'left (elatex--proof-layout-left-label-index layout))
+                  (cons 'right (elatex--proof-layout-right-label-index layout))))
+          (when (cdr entry)
+            (let* ((label (elatex--box-child box (cdr entry)))
+                   (x (if (eq (car entry) 'left)
+                          (- -1 (elatex--box-width label))
+                        (1+ rule-width)))
+                   (y (- rule-y (elatex--box-y-center label))))
+              (setf (elatex--box-rx label) x
+                    (elatex--box-ry label) y
+                    (elatex--box-state label) elatex--relposknown)
+              (setq minimum-x (min minimum-x x)
+                    maximum-x (max maximum-x (+ x (elatex--box-width label)))
+                    minimum-y (min minimum-y y)
+                    maximum-y (max maximum-y (+ y (elatex--box-height label)))))))
+        (let ((x-shift (- minimum-x))
+              (y-shift (- minimum-y)))
+          (dotimes (index (elatex--box-child-count box))
+            (let ((child (elatex--box-child box index)))
+              (cl-incf (elatex--box-rx child) x-shift)
+              (cl-incf (elatex--box-ry child) y-shift)))
+          (setf (elatex--box-width box) (- maximum-x minimum-x)
+                (elatex--box-height box) (- maximum-y minimum-y)
+                (elatex--box-x-center box) (+ rule-left x-shift)
+                (elatex--box-y-center box)
+                (+ conclusion-y (elatex--box-y-center conclusion) y-shift)
+                (elatex--box-x-align box) elatex--fix
+                (elatex--box-y-align box) elatex--fix
+                (elatex--box-state box) elatex--sizeknown))
+        0)))))
+
 (defun elatex--box-size (box)
   "Compute BOX size if initialized; return zero on success."
   (if (/= (elatex--box-state box) elatex--init)
@@ -401,6 +544,8 @@ When PRESERVE-SINGLE-LINE-BASELINE is non-nil, the caller sets Y center."
        (elatex--line-box-size box))
       ((pred (lambda (type) (= type elatex--b-endline)))
        (elatex--endline-box-size box))
+      ((pred (lambda (type) (= type elatex--b-proof)))
+       (elatex--proof-box-size box))
       (_ (elatex--add-error elatex--errunknownbox) 1))))
 
 (defun elatex--box-pos-recursive (box)

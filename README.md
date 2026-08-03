@@ -64,6 +64,29 @@ operator sizing, variant glyph forms, and delimiter stretching are outside its
 scope.  The translated 2,916-entry symbol-list APIs remain pinned exactly to
 `libtexprintf`.
 
+## Render proof trees
+
+Centered [MathJax `bussproofs`](https://docs.mathjax.org/en/latest/input/tex/extensions/bussproofs.html)
+proof trees are supported inside the required `prooftree` environment:
+
+```elisp
+(elatex-string
+ "\\begin{prooftree}\\AxiomC{A}\\AxiomC{B}\\BinaryInfC{C}\\end{prooftree}")
+```
+
+```text
+ A   B
+───────
+   C
+```
+
+The renderer recognizes `AxiomC`; unary through quinary `InfC` commands;
+left and right labels; solid, dashed, and absent line modes; root-at-top and
+root-at-bottom modes; and MathJax's `AXC`, `UIC`, `BIC`, `TIC`, `LL`, and `RL`
+abbreviations.  Rules use Unicode box drawing in Unicode style and terminal-safe
+patterns in ASCII style.  Sequent-calculus commands such as `fCenter` and the
+non-`C` inference forms, plus double and dotted rules, are not supported.
+
 ## Live preview mode
 
 `elatex-preview` provides realtime output for `markdown-mode`,

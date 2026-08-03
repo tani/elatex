@@ -575,6 +575,46 @@ Return vector [CELLS END NC HSEP]."
                (make-string columns vertical)
                clean))))))
 
+(defun elatex--environment-command-p (string position command)
+  "Return non-nil when COMMAND begins at POSITION in STRING exactly."
+  (let ((end (+ position (length command))))
+    (and (<= end (length string))
+         (string= command (substring string position end))
+         (or (= end (length string))
+             (not (elatex--ascii-letter-p (aref string end)))))))
+
+(defun elatex--begin-prooftree-env (token string result)
+  "Expand a prooftree TOKEN in STRING into RESULT."
+  (let ((begin (elatex--token-next token))
+        (position (elatex--token-next token))
+        (length (length string))
+        (depth 0)
+        done)
+    (while (and (< position length) (not done))
+      (cond
+       ((elatex--environment-command-p string position "\\begin")
+        (let ((argument (elatex--argument string (+ position 6))))
+          (setq depth (1+ depth)
+                position (if (car argument) (cdr argument) (+ position 6)))))
+       ((elatex--environment-command-p string position "\\end")
+        (let ((argument (elatex--argument string (+ position 4))))
+          (if (> depth 0)
+              (setq depth (1- depth)
+                    position (if (car argument) (cdr argument) (+ position 4)))
+            (if (equal (car argument) "prooftree")
+                (progn
+                  (setf (elatex--token-p result) elatex--pd-prooftree
+                        (elatex--token-next result) (cdr argument))
+                  (elatex--token-set-args
+                   result (list (substring string begin position)))
+                  (setq done t))
+              (elatex--add-error elatex--errnomatchinend)
+              (setq done t)))))
+       (t
+        (setq position (1+ position)))))
+    (unless done
+      (elatex--add-error elatex--errnomatchinend))))
+
 (defun elatex--begin-env (token string)
   "Expand a begin-environment TOKEN in STRING."
   (let* ((name (aref (elatex--token-args token) 0))
@@ -591,6 +631,8 @@ Return vector [CELLS END NC HSEP]."
                   elatex--pd-bbmatrix elatex--pd-bmatrix
                   elatex--pd-pmatrix))
       (elatex--begin-matrix-env token string identity result))
+     ((eq identity elatex--pd-prooftree)
+      (elatex--begin-prooftree-env token string result))
      (t
       (elatex--add-error elatex--errunknownenv)))
     (when (and (elatex--token-next result)

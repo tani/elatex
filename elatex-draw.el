@@ -103,8 +103,13 @@
                                     (elatex--box-child-count box))))
                      ((= type elatex--b-endline)
                       (list (concat padding "Type: ENDLINE")))
+                     ((= type elatex--b-proof)
+                      (list (concat padding "Type: PROOF")
+                            (format "%sNc=%d" detail
+                                    (elatex--box-child-count box))))
                      (t nil))))
-      (when (memq type (list elatex--b-array elatex--b-pos elatex--b-line))
+      (when (memq type (list elatex--b-array elatex--b-pos elatex--b-line
+                             elatex--b-proof))
         (dotimes (index (elatex--box-child-count box))
           (setq lines
                 (append lines

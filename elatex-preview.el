@@ -86,7 +86,7 @@ the terminal-safe `after-string' backend."
 (defcustom elatex-preview-math-environments
   '("math" "displaymath" "equation" "equation*" "align" "align*"
     "aligned" "gather" "gather*" "multline" "multline*" "eqnarray"
-    "eqnarray*")
+    "eqnarray*" "prooftree")
   "LaTeX environments recognized as mathematical source."
   :type '(repeat string)
   :group 'elatex-preview)
@@ -308,8 +308,10 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
                             :begin begin :end end
                             :content-begin content-begin
                             :content-end content-end
-                            :content (buffer-substring-no-properties
-                                      content-begin content-end))))
+                            :content
+                            (buffer-substring-no-properties
+                             (if (equal name "prooftree") begin content-begin)
+                             (if (equal name "prooftree") end content-end)))))
                       (when (or (null best)
                                 (< (- end begin)
                                    (- (elatex-preview--context-end best)
@@ -374,8 +376,11 @@ ALLOW-MARKDOWN-LITERAL permits GitHub's backtick-delimited math syntax."
                         (elatex-preview--make-context
                          :begin begin :end end
                          :content-begin content-begin :content-end content-end
-                         :content (substring source
-                                             (car bounds) (cdr bounds))))))))))
+                         :content
+                         (if (string-prefix-p "\\begin{prooftree}" source)
+                             source
+                           (substring source
+                                      (car bounds) (cdr bounds)))))))))))
       context)))
 
 (defun elatex-preview--prefer-context (&rest contexts)
