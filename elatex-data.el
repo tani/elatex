@@ -4099,9 +4099,7 @@
   prime
   dprime
   tprime
-  qprime
-  proof-solid
-  proof-dashed)
+  qprime)
 
 (defconst elatex--style-unicode-template
   (elatex--make-style
@@ -4254,9 +4252,7 @@
  8279
  0
  0
- 0]
-   :proof-solid "─"
-   :proof-dashed "┄")
+ 0])
   "Pinned Unicode drawing style.")
 
 (defconst elatex--style-ascii-template
@@ -4410,9 +4406,7 @@
  39
  39
  39
- 39]
-   :proof-solid "-"
-   :proof-dashed "- ")
+ 39])
   "Pinned ASCII-preferred drawing style.")
 
 (defconst elatex--mathjax-symbols

@@ -73,6 +73,29 @@
                       "╰─────────╯"))))
         (elatex-preview-mode -1)))))
 
+(ert-deftest elatex-preview/prooftree-inside-display-math ()
+  (with-temp-buffer
+    (setq major-mode 'latex-mode)
+    (insert "\\[\n"
+            "\\begin{prooftree}\n"
+            "\\AXC{A}\n"
+            "\\AXC{B}\n"
+            "\\BIC{C}\n"
+            "\\end{prooftree}\n"
+            "\\]")
+    (goto-char (point-min))
+    (search-forward "BIC")
+    (let ((elatex-preview-idle-delay 0)
+          (elatex-preview-backend 'after-string))
+      (unwind-protect
+          (progn
+            (elatex-preview-mode 1)
+            (elatex-preview-refresh)
+            (should (equal elatex-preview--last-output
+                           " A   B\n───────\n   C"))
+            (should-not elatex-preview--last-errors))
+        (elatex-preview-mode -1)))))
+
 (ert-deftest elatex-preview/child-frame-payload-is-unboxed ()
   (let ((payload (elatex-preview--format-payload
                   "a+b" '("First error" "Second error"))))

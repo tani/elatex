@@ -191,6 +191,16 @@
       "\\rootAtTop" "\\AXC{A}" "\\UIC{B}" "\\rootAtBottom" "\\UIC{C}"))
     " B\n───\n A\n───\n C")))
 
+(ert-deftest elatex-bussproofs/original-style-record-remains-compatible ()
+  (let ((elatex--unicode-style
+         (apply #'record
+                (cl-loop for index below 39
+                         collect (aref elatex--style-unicode-template index)))))
+    (should
+     (equal
+      (elatex-string (elatex-test--proof "\\AXC{A}" "\\UIC{B}"))
+      " A\n───\n B"))))
+
 (ert-deftest elatex-bussproofs/recoverable-errors-and-environment-scope ()
   (let ((outside (elatex-render "\\AxiomC{A}")))
     (should (equal (elatex-result-output outside) ""))

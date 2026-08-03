@@ -120,8 +120,8 @@
   "Return the current drawing pattern for proof line STYLE."
   (pcase style
     ('none "")
-    ('dashed (elatex--style-proof-dashed elatex--style))
-    (_ (elatex--style-proof-solid elatex--style))))
+    ('dashed (if (eq elatex--style-kind 'ascii) "- " "┄"))
+    (_ (if (eq elatex--style-kind 'ascii) "-" "─"))))
 
 (defun elatex--proof-make-inference (state arity source font)
   "Apply an ARITY inference with SOURCE to proof STATE in FONT."
